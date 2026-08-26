@@ -17,12 +17,13 @@ src/
 │   ├── visa/             # port + Sherpa/static
 │   ├── checklist/        # internal templates
 │   ├── journey/          # trips + pipeline tree (Prisma)
-│   ├── planner/          # orchestrates domain modules
+│   ├── planner/          # LLM skeleton + domain enrichment
 │   ├── cost/             # roll-up
 │   └── policy/           # lock/custom AI rules
 └── shared/
     ├── http/             # Fastify app + reply helpers
-    └── logging/          # pino file logger (logs/app.log, logs/error.log)
+    ├── logging/          # pino file logger (logs/app.log, logs/error.log)
+    └── cache/            # Redis / memory cache-aside for providers
 ```
 
 **Swap a provider** without touching domain code:
@@ -68,9 +69,38 @@ LOG_DIR=logs
 LOG_LEVEL=info
 ```
 
+## Redis cache (third-party providers + trips)
+
+Flights, hotels, places, routes, weather, events, visa, and trip reads (`/v1/trips`) are cached (cache-aside). Trip writes invalidate related keys.
+
+```bash
+# from repo root
+docker compose up -d redis
+```
+
+```env
+CACHE_ENABLED=true
+REDIS_URL=redis://localhost:6379
+CACHE_TTL_FLIGHTS=900
+CACHE_TTL_HOTELS=900
+CACHE_TTL_PLACES=86400
+CACHE_TTL_ROUTES=3600
+CACHE_TTL_WEATHER=1800
+CACHE_TTL_EVENTS=1800
+CACHE_TTL_VISA=604800
+CACHE_TTL_TRIPS=60
+```
+
+Without `REDIS_URL`, the API falls back to **in-memory** cache. Set `CACHE_ENABLED=false` to disable.
+
 ## Example calls
 
 ```bash
+# planner skeleton (LLM Fase 1)
+curl -X POST http://localhost:3000/v1/planner/skeleton \
+  -H "content-type: application/json" \
+  -d '{"prompt":"Liburan ke Jepang peak season budget affordable","preferences":{"originCity":"Jakarta","partySize":2}}'
+
 # flights (mock)
 curl -X POST http://localhost:3000/v1/flights/search \
   -H "content-type: application/json" \
@@ -81,6 +111,14 @@ curl -X POST http://localhost:3000/v1/trips \
   -H "authorization: Bearer dev:demo-user" \
   -H "content-type: application/json" \
   -d '{"title":"Japan 2026","originCity":"Jakarta","destinationSummary":"Osaka"}'
+```
+
+### LLM env
+
+```env
+LLM_PROVIDER=           # empty = openai if OPENAI_API_KEY set, else heuristic
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 ## Tests

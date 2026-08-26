@@ -52,8 +52,41 @@ describe("loadEnv", () => {
     assert.equal(env.authMode, "dev");
     assert.equal(env.logDir, "logs");
     assert.equal(env.logLevel, "info");
+    assert.equal(env.cache.enabled, true);
+    assert.equal(env.cache.ttl.flights, 900);
+    assert.equal(env.cache.ttl.places, 86_400);
     assert.match(env.databaseUrl, /traverior/);
     assert.equal(env.providers.flights, "mock");
     assert.equal(env.providers.visa, "static");
+  });
+
+  it("parses cache env overrides", () => {
+    const env = loadEnv(
+      baseEnv({
+        CACHE_ENABLED: "false",
+        REDIS_URL: "redis://localhost:6379",
+        CACHE_TTL_FLIGHTS: "120",
+        CACHE_TTL_WEATHER: "not-a-number",
+      }),
+    );
+    assert.equal(env.cache.enabled, false);
+    assert.equal(env.cache.redisUrl, "redis://localhost:6379");
+    assert.equal(env.cache.ttl.flights, 120);
+    assert.equal(env.cache.ttl.weather, 1_800);
+  });
+
+  it("selects llm provider from env", () => {
+    const withKey = loadEnv(baseEnv({ OPENAI_API_KEY: "sk-test" }));
+    assert.equal(withKey.llm.provider, "openai");
+    assert.equal(withKey.llm.model, "gpt-4o-mini");
+
+    const forced = loadEnv(
+      baseEnv({ OPENAI_API_KEY: "sk-test", LLM_PROVIDER: "heuristic", OPENAI_MODEL: "gpt-4.1-mini" }),
+    );
+    assert.equal(forced.llm.provider, "heuristic");
+    assert.equal(forced.llm.model, "gpt-4.1-mini");
+
+    const noKey = loadEnv(baseEnv({ OPENAI_API_KEY: "" }));
+    assert.equal(noKey.llm.provider, "heuristic");
   });
 });

@@ -175,4 +175,79 @@ describe("JourneyService", () => {
       destinationSummary: "Osaka",
     });
   });
+
+  it("caches list/get and invalidates on write", async () => {
+    const { MemoryCacheStore } = await import("../../../shared/cache/index.js");
+    let listCalls = 0;
+    let getCalls = 0;
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      baseCurrency: "IDR",
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Japan" }],
+    };
+    const db = {
+      user: { upsert: async () => ({ id: "user-1" }) },
+      trip: {
+        findMany: async () => {
+          listCalls += 1;
+          return [{ id: "trip-1" }];
+        },
+        findFirst: async () => {
+          getCalls += 1;
+          return tripRow;
+        },
+        create: async () => ({}),
+        update: async () => ({}),
+      },
+      pipelineNode: {
+        create: async () => ({ id: "n2", title: "Hotel" }),
+        findMany: async () => [],
+        update: async () => ({}),
+      },
+      $transaction: async (fn: (tx: never) => unknown) =>
+        fn({
+          trip: {
+            create: async () => ({
+              id: "trip-2",
+              userId: "user-1",
+              title: "New",
+              baseCurrency: "IDR",
+            }),
+            update: async () => ({
+              id: "trip-2",
+              nodes: [{ id: "root-2", parentId: null, depth: 0, path: "trip", title: "New" }],
+            }),
+          },
+          pipelineNode: { create: async () => ({ id: "root-2" }) },
+        } as never),
+    };
+
+    const service = new JourneyService(db as never, {
+      cache: new MemoryCacheStore(),
+      ttlSeconds: 60,
+    });
+
+    await service.listTrips("user-1");
+    await service.listTrips("user-1");
+    assert.equal(listCalls, 1);
+
+    await service.getTrip("trip-1", "user-1");
+    await service.getTrip("trip-1", "user-1");
+    assert.equal(getCalls, 1);
+
+    await service.addNode({
+      tripId: "trip-1",
+      userId: "user-1",
+      parentId: "root-1",
+      type: "LEAF",
+      title: "Cafe",
+    });
+    await service.getTrip("trip-1", "user-1");
+    assert.equal(getCalls, 2);
+
+    await service.createTrip({ userId: "user-1", title: "Another" });
+    await service.listTrips("user-1");
+    assert.equal(listCalls, 2);
+  });
 });

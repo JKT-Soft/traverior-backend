@@ -1,4 +1,5 @@
 import type { Env } from "../../config/env.js";
+import type { CacheStore } from "../../shared/cache/index.js";
 import { RouteService } from "./application/service.js";
 import type { RouteProvider } from "./domain/ports.js";
 import { createRouteRoutes } from "./http/routes.js";
@@ -16,7 +17,10 @@ export function createRouteProvider(env: Env): RouteProvider {
   }
 }
 
-export function createRouteModule(env: Env) {
-  const service = new RouteService(createRouteProvider(env));
+export function createRouteModule(env: Env, cache?: CacheStore) {
+  const service = new RouteService(createRouteProvider(env), {
+    cache,
+    ttlSeconds: env.cache.ttl.routes,
+  });
   return { service, routes: createRouteRoutes(service) };
 }

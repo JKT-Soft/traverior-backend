@@ -16,6 +16,19 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: traverior-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - traverior_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: ./services/api
@@ -25,6 +38,8 @@ services:
       - ./services/api/.env.example
     environment:
       DATABASE_URL: postgresql://traverior:traverior@postgres:5432/traverior?schema=public
+      REDIS_URL: redis://redis:6379
+      CACHE_ENABLED: "true"
       PORT: 3000
       AUTH_MODE: dev
       PROVIDER_FLIGHTS: mock
@@ -39,6 +54,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   traverior_pg:
+  traverior_redis:

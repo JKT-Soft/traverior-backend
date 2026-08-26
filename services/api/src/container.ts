@@ -9,11 +9,13 @@ import { createHotelModule } from "./modules/hotels/index.js";
 import { createJourneyModule } from "./modules/journey/index.js";
 import { createPlaceModule } from "./modules/places/index.js";
 import { createPlannerRoutes } from "./modules/planner/http.js";
+import { createLlmClient } from "./modules/planner/infra/create-llm.js";
 import { PlannerService } from "./modules/planner/service.js";
 import { PolicyService } from "./modules/policy/service.js";
 import { createRouteModule } from "./modules/routes/index.js";
 import { createVisaModule } from "./modules/visa/index.js";
 import { createWeatherModule } from "./modules/weather/index.js";
+import { createCacheStore, type CacheStore } from "./shared/cache/index.js";
 import { buildApp, type AuthResolver } from "./shared/http/app.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
@@ -21,6 +23,7 @@ import { createFileLogger } from "./shared/logging/logger.js";
 export type AppContainer = {
   env: Env;
   app: FastifyInstance;
+  cache: CacheStore;
   resolveAuth: AuthResolver;
   services: {
     auth: ReturnType<typeof createAuthModule>["service"];
@@ -40,20 +43,24 @@ export type AppContainer = {
 };
 
 export async function createContainer(env: Env): Promise<AppContainer> {
+  const cache = await createCacheStore(env);
+
   const auth = createAuthModule(env);
-  const flights = createFlightModule(env);
-  const hotels = createHotelModule(env);
-  const places = createPlaceModule(env);
-  const routes = createRouteModule(env);
-  const weather = createWeatherModule(env);
-  const events = createEventModule(env);
-  const visa = createVisaModule(env);
+  const flights = createFlightModule(env, cache);
+  const hotels = createHotelModule(env, cache);
+  const places = createPlaceModule(env, cache);
+  const routes = createRouteModule(env, cache);
+  const weather = createWeatherModule(env, cache);
+  const events = createEventModule(env, cache);
+  const visa = createVisaModule(env, cache);
   const checklist = createChecklistModule();
-  const journey = createJourneyModule();
+  const journey = createJourneyModule({ env, cache });
   const cost = new CostService();
   const policy = new PolicyService();
-  
+  const llm = createLlmClient(env);
+
   const planner = new PlannerService({
+    llm,
     flights: flights.service,
     hotels: hotels.service,
     places: places.service,
@@ -78,16 +85,29 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     exposeErrorDetails: isDev,
   });
 
+  app.addHook("onClose", async () => {
+    await cache.quit?.();
+  });
+
   app.get("/health", async (_req, reply) => {
     return ok(reply, {
       service: "traverior-api",
       architecture: "modular-monolith",
       framework: "fastify",
       auth: env.authMode,
+      llm: {
+        provider: env.llm.provider,
+        model: env.llm.model,
+        client: llm.name,
+      },
+      cache: {
+        enabled: env.cache.enabled,
+        store: cache.name,
+        ttl: env.cache.ttl,
+      },
       providers: env.providers,
     });
   });
-
   await app.register(auth.routes, { prefix: "/v1/auth" });
   await app.register(flights.routes, { prefix: "/v1/flights" });
   await app.register(hotels.routes, { prefix: "/v1/hotels" });
@@ -103,6 +123,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   return {
     env,
     app,
+    cache,
     resolveAuth: auth.resolveAuth,
     services: {
       auth: auth.service,

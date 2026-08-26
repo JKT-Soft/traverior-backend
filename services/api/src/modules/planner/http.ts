@@ -6,6 +6,27 @@ import type { PlannerService } from "./service.js";
 
 export function createPlannerRoutes(service: PlannerService): FastifyPluginAsync {
   return async (app) => {
+    app.post("/skeleton", async (req, reply) => {
+      const parsed = z
+        .object({
+          prompt: z.string().min(1),
+          preferences: z
+            .object({
+              originCity: z.string().optional(),
+              startDate: z.string().optional(),
+              endDate: z.string().optional(),
+              partySize: z.number().int().positive().optional(),
+              budgetTone: z.enum(["budget", "mid", "luxury"]).optional(),
+              pace: z.enum(["relaxed", "moderate", "packed"]).optional(),
+              passportCountry: z.string().optional(),
+            })
+            .optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) throw new ValidationError("Invalid body");
+      return ok(reply, await service.planSkeleton(parsed.data));
+    });
+
     app.post("/enrich-city", async (req, reply) => {
       const parsed = z
         .object({

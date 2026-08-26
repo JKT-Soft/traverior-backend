@@ -1,3 +1,10 @@
+import { AppError, ValidationError } from "../../shared/http/errors.js";
+import type { LlmClient } from "./domain/ports.js";
+import {
+  TripSkeletonSchema,
+  type PlanSkeletonInput,
+  type TripSkeleton,
+} from "./domain/skeleton.js";
 import type { FlightService } from "../flights/application/service.js";
 import type { HotelService } from "../hotels/application/service.js";
 import type { PlaceService } from "../places/application/service.js";
@@ -6,8 +13,10 @@ import type { WeatherService } from "../weather/application/service.js";
 import type { EventService } from "../events/application/service.js";
 import type { VisaService } from "../visa/application/service.js";
 import type { ChecklistService } from "../checklist/application/service.js";
+import { buildSkeletonUserPrompt, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
 
 export type PlannerDeps = {
+  llm: LlmClient;
   flights: FlightService;
   hotels: HotelService;
   places: PlaceService;
@@ -19,11 +28,54 @@ export type PlannerDeps = {
 };
 
 /**
- * AI Planner orchestrates domain modules (MCP tools will call the same services).
- * Phase 1 MVP: deterministic enrichment stubs — LLM wiring comes next.
+ * AI Planner: Fase 1 = LLM skeleton (no tools).
+ * enrichCity remains deterministic domain enrichment (pre-MCP path).
  */
 export class PlannerService {
   constructor(private readonly deps: PlannerDeps) {}
+
+  get llmName(): string {
+    return this.deps.llm.name;
+  }
+
+  /**
+   * Fase 1 — natural language → trip skeleton JSON (checkpoints + needs).
+   * Does not call MCP/providers and must not invent live prices.
+   */
+  async planSkeleton(input: PlanSkeletonInput): Promise<{
+    skeleton: TripSkeleton;
+    llm: string;
+  }> {
+    const prompt = input.prompt?.trim();
+    if (!prompt) throw new ValidationError("prompt is required");
+
+    const raw = await this.deps.llm.completeJson({
+      temperature: 0.3,
+      maxTokens: 1200,
+      messages: [
+        { role: "system", content: SKELETON_SYSTEM_PROMPT },
+        { role: "user", content: buildSkeletonUserPrompt({ ...input, prompt }) },
+      ],
+    });
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripCodeFence(raw));
+    } catch {
+      throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
+    }
+
+    const skeleton = TripSkeletonSchema.safeParse(parsed);
+    if (!skeleton.success) {
+      throw new AppError(
+        502,
+        `LLM skeleton failed validation: ${skeleton.error.issues[0]?.message ?? "invalid"}`,
+        "LLM_INVALID_SKELETON",
+      );
+    }
+
+    return { skeleton: skeleton.data, llm: this.deps.llm.name };
+  }
 
   async enrichCity(input: {
     city: string;
@@ -37,7 +89,7 @@ export class PlannerService {
     passportCountry?: string;
     destinationCountry?: string;
   }) {
-    const [hotels, restaurants, events, weather, visa, checklist] = await Promise.all([
+    const [hotels, restaurants, events, weather, visa] = await Promise.all([
       this.deps.hotels.search({
         cityName: input.city,
         countryCode: input.countryCode,
@@ -53,7 +105,6 @@ export class PlannerService {
         passportCountry: input.passportCountry ?? "ID",
         destinationCountry: input.destinationCountry ?? input.countryCode ?? "JP",
       }),
-      Promise.resolve(null as null),
     ]);
 
     const checklistResult = await this.deps.checklist.generate({
@@ -86,4 +137,10 @@ export class PlannerService {
       route,
     };
   }
+}
+
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced?.[1]?.trim() ?? trimmed;
 }

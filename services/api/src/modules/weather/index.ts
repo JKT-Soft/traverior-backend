@@ -1,4 +1,5 @@
 import type { Env } from "../../config/env.js";
+import type { CacheStore } from "../../shared/cache/index.js";
 import { WeatherService } from "./application/service.js";
 import type { WeatherProvider } from "./domain/ports.js";
 import { createWeatherRoutes } from "./http/routes.js";
@@ -16,7 +17,10 @@ export function createWeatherProvider(env: Env): WeatherProvider {
   }
 }
 
-export function createWeatherModule(env: Env) {
-  const service = new WeatherService(createWeatherProvider(env));
+export function createWeatherModule(env: Env, cache?: CacheStore) {
+  const service = new WeatherService(createWeatherProvider(env), {
+    cache,
+    ttlSeconds: env.cache.ttl.weather,
+  });
   return { service, routes: createWeatherRoutes(service) };
 }

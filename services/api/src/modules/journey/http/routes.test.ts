@@ -71,7 +71,7 @@ describe("journey http routes", () => {
     prismaMock.pipelineNode.findMany = createMockFn(async () => []);
     prismaMock.pipelineNode.create = createMockFn(async () => ({ id: "n1" }));
 
-    const { routes } = createJourneyModule(prismaMock as never);
+    const { routes } = createJourneyModule({ db: prismaMock as never });
 
     const unauth = await buildTestApp(routes);
     const denied = await injectJson(unauth, "GET", "/");

@@ -5,8 +5,28 @@ export type Env = {
   databaseUrl: string;
   logDir: string;
   logLevel: string;
+  cache: {
+    enabled: boolean;
+    redisUrl?: string;
+    ttl: {
+      flights: number;
+      hotels: number;
+      places: number;
+      routes: number;
+      weather: number;
+      events: number;
+      visa: number;
+      trips: number;
+    };
+  };
   firebaseProjectId?: string;
   openaiApiKey?: string;
+  llm: {
+    /** openai when key present (unless forced); heuristic for offline/dev */
+    provider: "openai" | "heuristic";
+    model: string;
+    baseUrl?: string;
+  };
   providers: {
     flights: string;
     hotels: string;
@@ -28,10 +48,32 @@ export type Env = {
   };
 };
 
+function intEnv(source: NodeJS.ProcessEnv, key: string, fallback: number): number {
+  const raw = source[key];
+  if (raw == null || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function boolEnv(source: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
+  const raw = source[key];
+  if (raw == null || raw === "") return fallback;
+  return raw === "1" || raw.toLowerCase() === "true";
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const authMode = (source.AUTH_MODE ?? "dev") as Env["authMode"];
   if (authMode !== "dev" && authMode !== "firebase") {
     throw new Error(`Invalid AUTH_MODE: ${authMode}`);
+  }
+
+  const openaiApiKey = source.OPENAI_API_KEY;
+  const llmProviderRaw = (source.LLM_PROVIDER ?? "").toLowerCase();
+  let llmProvider: Env["llm"]["provider"];
+  if (llmProviderRaw === "openai" || llmProviderRaw === "heuristic") {
+    llmProvider = llmProviderRaw;
+  } else {
+    llmProvider = openaiApiKey ? "openai" : "heuristic";
   }
 
   return {
@@ -43,8 +85,27 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       "postgresql://traverior:traverior@localhost:5432/traverior?schema=public",
     logDir: source.LOG_DIR ?? "logs",
     logLevel: source.LOG_LEVEL ?? "info",
+    cache: {
+      enabled: boolEnv(source, "CACHE_ENABLED", true),
+      redisUrl: source.REDIS_URL,
+      ttl: {
+        flights: intEnv(source, "CACHE_TTL_FLIGHTS", 900),
+        hotels: intEnv(source, "CACHE_TTL_HOTELS", 900),
+        places: intEnv(source, "CACHE_TTL_PLACES", 86_400),
+        routes: intEnv(source, "CACHE_TTL_ROUTES", 3_600),
+        weather: intEnv(source, "CACHE_TTL_WEATHER", 1_800),
+        events: intEnv(source, "CACHE_TTL_EVENTS", 1_800),
+        visa: intEnv(source, "CACHE_TTL_VISA", 604_800),
+        trips: intEnv(source, "CACHE_TTL_TRIPS", 60),
+      },
+    },
     firebaseProjectId: source.FIREBASE_PROJECT_ID,
-    openaiApiKey: source.OPENAI_API_KEY,
+    openaiApiKey,
+    llm: {
+      provider: llmProvider,
+      model: source.OPENAI_MODEL ?? "gpt-4o-mini",
+      baseUrl: source.OPENAI_BASE_URL,
+    },
     providers: {
       flights: source.PROVIDER_FLIGHTS ?? "mock",
       hotels: source.PROVIDER_HOTELS ?? "mock",

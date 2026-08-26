@@ -40,7 +40,7 @@ function createPrismaMock(): {
 
 describe("createJourneyModule", () => {
   it("wires service and routes", () => {
-    const mod = createJourneyModule(createPrismaMock() as never);
+    const mod = createJourneyModule({ db: createPrismaMock() as never });
     assert.ok(mod.service instanceof JourneyService);
     assert.equal(typeof mod.routes, "function");
   });

@@ -1,4 +1,5 @@
 import type { Env } from "../../config/env.js";
+import type { CacheStore } from "../../shared/cache/index.js";
 import { PlaceService } from "./application/service.js";
 import type { PlaceProvider } from "./domain/ports.js";
 import { createPlaceRoutes } from "./http/routes.js";
@@ -16,7 +17,10 @@ export function createPlaceProvider(env: Env): PlaceProvider {
   }
 }
 
-export function createPlaceModule(env: Env) {
-  const service = new PlaceService(createPlaceProvider(env));
+export function createPlaceModule(env: Env, cache?: CacheStore) {
+  const service = new PlaceService(createPlaceProvider(env), {
+    cache,
+    ttlSeconds: env.cache.ttl.places,
+  });
   return { service, routes: createPlaceRoutes(service) };
 }

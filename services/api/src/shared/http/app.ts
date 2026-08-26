@@ -99,10 +99,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const exposeErrorDetails = options.exposeErrorDetails ?? false;
   const loggerOpt = options.logger ?? false;
 
-  const app =
+  // Fastify 5: boolean/config → `logger`; prebuilt pino → `loggerInstance`
+  const app = (
     typeof loggerOpt === "object" && loggerOpt !== null
       ? Fastify({ loggerInstance: loggerOpt as Logger })
-      : Fastify({ logger: Boolean(loggerOpt) });
+      : Fastify({ logger: Boolean(loggerOpt) })
+  ) as FastifyInstance;
 
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof AppError) {

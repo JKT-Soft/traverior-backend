@@ -202,24 +202,27 @@ GOOGLE_MAPS_API_KEY=...
 
 ---
 
-## 5. `mcp-weather` → OpenWeather One Call 3.0
+## 5. `mcp-weather` → OpenWeather Forecast 2.5
 
 **Base URL:** `https://api.openweathermap.org`  
 **Auth:** query `appid=<OPENWEATHER_API_KEY>`  
-**Docs:** https://openweathermap.org/api/one-call-3
+**Docs:** https://openweathermap.org/forecast5
 
 ### MCP Tools
 
 | Tool | Endpoint |
 |------|----------|
-| `get_forecast` | `GET /data/3.0/onecall?lat=&lon=&exclude=minutely` |
-| `get_weather_alerts` | Sama One Call — ambil field `alerts[]` (bisa 1 call untuk keduanya) |
+| `get_forecast` | `GET /data/2.5/forecast` (+ optional `/data/2.5/weather` for current temp) |
+| `get_weather_alerts` | Tidak di free tier → `alerts: []` (One Call 3.0 berbayar terpisah) |
 
 ```http
-GET https://api.openweathermap.org/data/3.0/onecall?lat=34.69&lon=135.50&units=metric&exclude=minutely&appid=...
+GET https://api.openweathermap.org/data/2.5/forecast?lat=34.69&lon=135.50&units=metric&appid=...
+GET https://api.openweathermap.org/data/2.5/weather?lat=34.69&lon=135.50&units=metric&appid=...
 ```
 
-**Output normalized:** daily forecast, `alerts[]` → bisa jadi `TripAlert`.
+**Output normalized:** daily min/max from 3-hour slots, current temp, empty `alerts[]` on free tier.
+
+**Catatan:** `/data/3.0/onecall` butuh langganan *One Call by Call* — Traverior memakai **2.5** agar API key standar jalan.
 
 ### Env
 ```env

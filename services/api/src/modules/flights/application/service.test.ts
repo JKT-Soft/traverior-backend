@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { MemoryCacheStore } from "../../../shared/cache/index.js";
 import { MockFlightProvider } from "../infra/mock-provider.js";
 import { FlightService } from "./service.js";
 
@@ -24,5 +25,24 @@ describe("FlightService", () => {
       searchFlights: async () => [],
     });
     assert.equal(await svc.getOffer("a"), null);
+  });
+
+  it("caches provider search results", async () => {
+    let calls = 0;
+    const provider = {
+      name: "counting",
+      searchFlights: async () => {
+        calls += 1;
+        return [];
+      },
+    };
+    const service = new FlightService(provider, {
+      cache: new MemoryCacheStore(),
+      ttlSeconds: 60,
+    });
+    const q = { origin: "CGK", destination: "KIX", departureDate: "2026-10-01" };
+    await service.search(q);
+    await service.search(q);
+    assert.equal(calls, 1);
   });
 });
