@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "coverage-run/src",
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "inlineSources": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "coverage", "coverage-run"]
+}

@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./services/api" },
+    { "path": "./services/mcp" }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@traverior/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Traverior modular monolith API (Fastify + Prisma)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file=.env dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/run-tests.mjs src --tsx",
+    "test:watch": "node scripts/run-tests.mjs src --tsx --watch",
+    "test:coverage": "node -e \"require('fs').rmSync('coverage-run',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && c8 -- node scripts/run-tests.mjs coverage-run/src"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.14.0",
+    "fastify": "^5.12.1",
+    "firebase-admin": "^13.4.0",
+    "pino": "^9.14.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.17.0",
+    "c8": "^12.0.0",
+    "prisma": "^6.14.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.2"
+  }
+}

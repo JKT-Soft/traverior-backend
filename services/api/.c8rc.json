@@ -1,0 +1,24 @@
+{
+  "all": true,
+  "src": ["coverage-run/src"],
+  "include": ["coverage-run/src/**/*.js"],
+  "exclude": [
+    "coverage-run/src/index.js",
+    "coverage-run/src/infra/prisma/client.js",
+    "**/domain/ports.js",
+    "**/shared/types/**",
+    "**/*.test.js",
+    "**/test/**",
+    "node_modules/**",
+    "dist/**",
+    "coverage/**",
+    "src/**"
+  ],
+  "reporter": ["text", "text-summary", "html", "lcov"],
+  "reports-dir": "coverage",
+  "check-coverage": true,
+  "lines": 100,
+  "functions": 100,
+  "branches": 100,
+  "statements": 100
+}

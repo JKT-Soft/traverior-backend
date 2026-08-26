@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: traverior-postgres
+    environment:
+      POSTGRES_USER: traverior
+      POSTGRES_PASSWORD: traverior
+      POSTGRES_DB: traverior
+    ports:
+      - "5432:5432"
+    volumes:
+      - traverior_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U traverior -d traverior"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: traverior-api
+    env_file:
+      - ./services/api/.env.example
+    environment:
+      DATABASE_URL: postgresql://traverior:traverior@postgres:5432/traverior?schema=public
+      PORT: 3000
+      AUTH_MODE: dev
+      PROVIDER_FLIGHTS: mock
+      PROVIDER_HOTELS: mock
+      PROVIDER_PLACES: mock
+      PROVIDER_ROUTES: mock
+      PROVIDER_WEATHER: mock
+      PROVIDER_EVENTS: mock
+      PROVIDER_VISA: static
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  traverior_pg:

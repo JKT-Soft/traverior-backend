@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TripStatus {
+  draft
+  planning
+  ready
+  active
+  completed
+  archived
+}
+
+enum NodeType {
+  JOURNEY
+  CHECKPOINT
+  LEG
+  ACTIVITY
+  POI
+  BOOKING
+  MODULE
+  LEAF
+}
+
+enum CheckpointKind {
+  ORIGIN
+  TRANSIT
+  STAY
+  DAY_TRIP
+  RETURN
+}
+
+enum NodeStatus {
+  planned
+  active
+  completed
+  disrupted
+  skipped
+}
+
+enum NodeOrigin {
+  ai
+  user
+  api
+}
+
+enum BudgetStyle {
+  budget
+  balanced
+  luxury
+}
+
+enum Pace {
+  relaxed
+  moderate
+  packed
+}
+
+enum TravelWith {
+  solo
+  couple
+  family
+  friends
+}
+
+enum EditAction {
+  add
+  edit
+  delete
+  lock
+  unlock
+  reorder
+  replace
+  replan
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  firebaseUid  String   @unique
+  email        String
+  displayName  String?
+  photoUrl     String?
+  locale       String   @default("id")
+  homeCurrency String   @default("IDR")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  preference UserPreference?
+  trips      Trip[]
+  editLogs   PipelineEditLog[]
+}
+
+model UserPreference {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @unique @db.Uuid
+  budgetMax   Decimal?    @db.Decimal(14, 2)
+  budgetStyle BudgetStyle @default(balanced)
+  pace        Pace        @default(moderate)
+  dietary     String[]    @default([])
+  interests   String[]    @default([])
+  travelWith  TravelWith?
+  avoid       String[]    @default([])
+  extra       Json?
+  updatedAt   DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Trip {
+  id                   String     @id @default(uuid()) @db.Uuid
+  userId               String     @db.Uuid
+  title                String
+  status               TripStatus @default(draft)
+  originCity           String?
+  destinationSummary   String?
+  startDate            DateTime?  @db.Date
+  endDate              DateTime?  @db.Date
+  partySize            Int        @default(1)
+  baseCurrency         String     @default("IDR")
+  totalCostAmount      Decimal    @default(0) @db.Decimal(14, 2)
+  totalCostIsEstimate  Boolean    @default(true)
+  totalDurationMinutes Int        @default(0)
+  rootNodeId           String?    @db.Uuid
+  planningVersion      Int        @default(0)
+  lastPlannedAt        DateTime?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nodes    PipelineNode[]
+  alerts   TripAlert[]
+  editLogs PipelineEditLog[]
+
+  @@index([userId, status])
+  @@index([userId, updatedAt])
+}
+
+model PipelineNode {
+  id                String          @id @default(uuid()) @db.Uuid
+  tripId            String          @db.Uuid
+  parentId          String?         @db.Uuid
+  depth             Int
+  path              String
+  sortOrder         Int             @default(0)
+  type              NodeType
+  checkpointKind    CheckpointKind?
+  title             String
+  subtitle          String?
+  status            NodeStatus      @default(planned)
+  contentType       String?
+  content           Json?
+  costAmount        Decimal         @default(0) @db.Decimal(14, 2)
+  costCurrency      String          @default("IDR")
+  costIsEstimate    Boolean         @default(true)
+  durationMinutes   Int             @default(0)
+  distanceMeters    Int?
+  scheduleStart     DateTime?
+  scheduleEnd       DateTime?
+  locationLat       Float?
+  locationLng       Float?
+  locationLabel     String?
+  deepLinkUrl       String?
+  provider          String?
+  providerRef       String?
+  origin            NodeOrigin      @default(ai)
+  isLocked          Boolean         @default(false)
+  isCustom          Boolean         @default(false)
+  userNotes         String?
+  suppressAiRestore Boolean         @default(false)
+  deletedAt         DateTime?
+  lastRefreshedAt   DateTime?
+  version           Int             @default(1)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  trip     Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  parent   PipelineNode?     @relation("NodeTree", fields: [parentId], references: [id])
+  children PipelineNode[]    @relation("NodeTree")
+  editLogs PipelineEditLog[]
+  alerts   TripAlert[]
+
+  @@index([tripId, parentId, sortOrder])
+  @@index([tripId, path])
+  @@index([tripId, type])
+  @@index([tripId, deletedAt])
+}
+
+model PipelineEditLog {
+  id        String     @id @default(uuid()) @db.Uuid
+  tripId    String     @db.Uuid
+  nodeId    String     @db.Uuid
+  userId    String     @db.Uuid
+  action    EditAction
+  before    Json?
+  after     Json?
+  createdAt DateTime   @default(now())
+
+  trip Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  node PipelineNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, createdAt])
+  @@index([nodeId, createdAt])
+}
+
+model TripAlert {
+  id        String        @id @default(uuid()) @db.Uuid
+  tripId    String        @db.Uuid
+  nodeId    String?       @db.Uuid
+  kind      String
+  severity  AlertSeverity @default(info)
+  title     String
+  body      String
+  payload   Json?
+  isRead    Boolean       @default(false)
+  createdAt DateTime      @default(now())
+
+  trip Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  node PipelineNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@index([tripId, isRead, createdAt])
+}
+
+model ProviderCache {
+  id        String   @id @default(uuid()) @db.Uuid
+  cacheKey  String   @unique
+  provider  String
+  toolName  String
+  request   Json
+  response  Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model ExchangeRate {
+  base      String
+  quote     String
+  rate      Decimal  @db.Decimal(18, 8)
+  fetchedAt DateTime
+
+  @@id([base, quote])
+}
