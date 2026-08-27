@@ -48,6 +48,9 @@ export class PlannerService {
   }> {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new ValidationError("prompt is required");
+    
+    console.log("=======================================================");
+    console.log(input);
 
     const raw = await this.deps.llm.completeJson({
       temperature: 0.3,
@@ -57,6 +60,9 @@ export class PlannerService {
         { role: "user", content: buildSkeletonUserPrompt({ ...input, prompt }) },
       ],
     });
+    
+    console.log("=======================================================");
+    console.log(raw);
 
     let parsed: unknown;
     try {
