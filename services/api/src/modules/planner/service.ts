@@ -1,8 +1,10 @@
 import { AppError, ValidationError } from "../../shared/http/errors.js";
+import type { McpToolClient, McpToolResult, PlannerToolContext } from "../../shared/mcp/index.js";
 import type { LlmClient } from "./domain/ports.js";
 import {
   TripSkeletonSchema,
   type PlanSkeletonInput,
+  type SkeletonCheckpoint,
   type TripSkeleton,
 } from "./domain/skeleton.js";
 import type { FlightService } from "../flights/application/service.js";
@@ -13,10 +15,12 @@ import type { WeatherService } from "../weather/application/service.js";
 import type { EventService } from "../events/application/service.js";
 import type { VisaService } from "../visa/application/service.js";
 import type { ChecklistService } from "../checklist/application/service.js";
+import { buildToolPlan } from "./infra/need-tools.js";
 import { buildSkeletonUserPrompt, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
 
 export type PlannerDeps = {
   llm: LlmClient;
+  mcp: McpToolClient;
   flights: FlightService;
   hotels: HotelService;
   places: PlaceService;
@@ -27,9 +31,15 @@ export type PlannerDeps = {
   checklist: ChecklistService;
 };
 
+export type CheckpointToolResults = {
+  checkpoint: SkeletonCheckpoint;
+  results: McpToolResult[];
+};
+
 /**
- * AI Planner: Fase 1 = LLM skeleton (no tools).
- * enrichCity remains deterministic domain enrichment (pre-MCP path).
+ * AI Planner:
+ * - Fase 1: LLM skeleton (no tools)
+ * - Fase 2: MCP tool execution via shared client (stdio or in-process)
  */
 export class PlannerService {
   constructor(private readonly deps: PlannerDeps) {}
@@ -38,9 +48,20 @@ export class PlannerService {
     return this.deps.llm.name;
   }
 
+  get mcpName(): string {
+    return this.deps.mcp.name;
+  }
+
+  listMcpTools(): Promise<Array<{ name: string; server: string }>> {
+    return this.deps.mcp.listTools();
+  }
+
+  callTool(tool: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    return this.deps.mcp.callTool(tool, args);
+  }
+
   /**
    * Fase 1 — natural language → trip skeleton JSON (checkpoints + needs).
-   * Does not call MCP/providers and must not invent live prices.
    */
   async planSkeleton(input: PlanSkeletonInput): Promise<{
     skeleton: TripSkeleton;
@@ -48,9 +69,6 @@ export class PlannerService {
   }> {
     const prompt = input.prompt?.trim();
     if (!prompt) throw new ValidationError("prompt is required");
-    
-    console.log("=======================================================");
-    console.log(input);
 
     const raw = await this.deps.llm.completeJson({
       temperature: 0.3,
@@ -60,9 +78,6 @@ export class PlannerService {
         { role: "user", content: buildSkeletonUserPrompt({ ...input, prompt }) },
       ],
     });
-    
-    console.log("=======================================================");
-    console.log(raw);
 
     let parsed: unknown;
     try {
@@ -83,6 +98,46 @@ export class PlannerService {
     return { skeleton: skeleton.data, llm: this.deps.llm.name };
   }
 
+  /**
+   * Fase 2 — run MCP tools for each checkpoint `needs[]` (parallel per checkpoint).
+   */
+  async executeSkeletonNeeds(
+    skeleton: TripSkeleton,
+    context: PlannerToolContext = {},
+  ): Promise<{ mcp: string; checkpoints: CheckpointToolResults[] }> {
+    const plan = buildToolPlan(skeleton, context);
+    const checkpoints = await Promise.all(
+      plan.map(async ({ checkpoint, calls }) => {
+        const results: McpToolResult[] = [];
+        let visaDocuments: string[] | undefined;
+
+        for (const call of calls) {
+          const args = { ...call.arguments };
+          if (call.tool === "generate_checklist" && visaDocuments?.length) {
+            args.visaDocuments = visaDocuments;
+          }
+          const result = await this.deps.mcp.callTool(call.tool, args);
+          results.push(result);
+          if (call.tool === "get_visa_requirements" && result.ok) {
+            const req = (result.data as { requirements?: { documents?: string[] } })
+              ?.requirements;
+            visaDocuments = req?.documents;
+          }
+        }
+
+        return { checkpoint, results };
+      }),
+    );
+    return { mcp: this.deps.mcp.name, checkpoints };
+  }
+
+  /** Convenience: skeleton from prompt then execute MCP tools. */
+  async planAndExecute(input: PlanSkeletonInput & { context?: PlannerToolContext }) {
+    const { skeleton, llm } = await this.planSkeleton(input);
+    const execution = await this.executeSkeletonNeeds(skeleton, input.context ?? {});
+    return { llm, skeleton, execution };
+  }
+
   async enrichCity(input: {
     city: string;
     countryCode?: string;
@@ -95,52 +150,52 @@ export class PlannerService {
     passportCountry?: string;
     destinationCountry?: string;
   }) {
-    const [hotels, restaurants, events, weather, visa] = await Promise.all([
-      this.deps.hotels.search({
-        cityName: input.city,
-        countryCode: input.countryCode,
-        checkIn: input.checkIn,
-        checkOut: input.checkOut,
-      }),
-      this.deps.places.searchRestaurants(input.city),
-      this.deps.events.search({ city: input.city, includeFree: true, includePaid: true }),
-      input.destLat != null && input.destLng != null
-        ? this.deps.weather.getForecast({ lat: input.destLat, lon: input.destLng })
-        : Promise.resolve(null),
-      this.deps.visa.getRequirements({
-        passportCountry: input.passportCountry ?? "ID",
-        destinationCountry: input.destinationCountry ?? input.countryCode ?? "JP",
-      }),
-    ]);
+    const ctx: PlannerToolContext = {
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      passportCountry: input.passportCountry,
+      originLat: input.originLat,
+      originLng: input.originLng,
+      destLat: input.destLat,
+      destLng: input.destLng,
+    };
 
-    const checklistResult = await this.deps.checklist.generate({
-      destination: input.city,
-      passportCountry: input.passportCountry ?? "ID",
-      visaDocuments: visa.documents,
-    });
+    const checkpoint: SkeletonCheckpoint = {
+      city: input.city,
+      countryCode: input.countryCode,
+      role: "STAY",
+      days: 1,
+      needs: ["hotels", "places", "events", "weather", "visa", "checklist"],
+    };
 
-    const route =
-      input.originLat != null &&
-      input.originLng != null &&
-      input.destLat != null &&
-      input.destLng != null
-        ? await this.deps.routes.getRoute({
-            originLat: input.originLat,
-            originLng: input.originLng,
-            destinationLat: input.destLat,
-            destinationLng: input.destLng,
-            mode: "TRANSIT",
-          })
-        : null;
+    if (input.originLat != null && input.originLng != null && input.destLat != null && input.destLng != null) {
+      checkpoint.needs.push("routes");
+    }
+
+    const [{ results }] = (
+      await this.executeSkeletonNeeds(
+        { title: input.city, checkpoints: [checkpoint] },
+        ctx,
+      )
+    ).checkpoints;
+
+    const byTool = Object.fromEntries(results.map((r) => [r.tool, r]));
+
+    const pick = <T>(tool: string, key: string): T | null => {
+      const row = byTool[tool];
+      if (!row?.ok || !row.data || typeof row.data !== "object") return null;
+      return ((row.data as Record<string, unknown>)[key] as T) ?? null;
+    };
 
     return {
-      hotels,
-      restaurants,
-      events,
-      weather,
-      visa,
-      checklist: checklistResult,
-      route,
+      mcp: this.deps.mcp.name,
+      hotels: pick("search_hotels", "hotels") ?? [],
+      restaurants: pick("search_restaurants", "places") ?? [],
+      events: pick("search_events", "events") ?? [],
+      weather: pick("get_forecast", "forecast"),
+      visa: pick("get_visa_requirements", "requirements"),
+      checklist: pick("generate_checklist", "checklist"),
+      route: pick("get_route", "route"),
     };
   }
 }

@@ -25,6 +25,7 @@ function envSlice(partial: Partial<Env> & { openaiApiKey?: string; llm: Env["llm
         events: 1,
         visa: 1,
         trips: 1,
+        images: 1,
       },
     },
     providers: {
@@ -35,6 +36,7 @@ function envSlice(partial: Partial<Env> & { openaiApiKey?: string; llm: Env["llm
       weather: "mock",
       events: "mock",
       visa: "static",
+      images: "mock",
     },
     secrets: {},
     ...partial,

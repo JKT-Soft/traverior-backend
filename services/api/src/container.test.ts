@@ -13,6 +13,15 @@ describe("createContainer", () => {
     assert.equal(health.json().data.framework, "fastify");
     assert.equal(container.services.auth.providerName, "dev");
     assert.equal(typeof container.resolveAuth, "function");
+
+    const denied = await container.app.inject({
+      method: "POST",
+      url: "/v1/flights/search",
+      headers: { "content-type": "application/json" },
+      payload: { origin: "CGK", destination: "KIX", departureDate: "2026-10-01" },
+    });
+    assert.equal(denied.statusCode, 401);
+
     await container.app.close();
   });
 });

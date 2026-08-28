@@ -250,4 +250,129 @@ describe("JourneyService", () => {
     await service.listTrips("user-1");
     assert.equal(listCalls, 2);
   });
+
+  it("planTrip persists AI nodes and rolls up cost", async () => {
+    const created: Array<{ type: string; title: string; path: string }> = [];
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Draft",
+      status: "draft",
+      partySize: 1,
+      baseCurrency: "IDR",
+      originCity: null,
+      destinationSummary: null,
+      startDate: null,
+      endDate: null,
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+    };
+
+    const db = {
+      user: { upsert: async () => ({ id: "user-1" }) },
+      trip: {
+        findMany: async () => [],
+        findFirst: async () => tripRow,
+        create: async () => ({}),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(tripRow, data);
+          return tripRow;
+        },
+      },
+      pipelineNode: {
+        findMany: async () => [
+          {
+            id: "root-1",
+            parentId: null,
+            type: "JOURNEY",
+            origin: "user",
+            isLocked: false,
+            isCustom: false,
+            suppressAiRestore: false,
+            deletedAt: null,
+          },
+        ],
+        create: async ({ data }: { data: { type: string; title: string; path: string; id?: string } }) => {
+          const row = { id: `n-${created.length + 1}`, ...data };
+          created.push({ type: data.type, title: data.title, path: data.path });
+          return row;
+        },
+        update: async () => ({}),
+      },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+
+    const planner = {
+      mcpName: "inprocess",
+      planSkeleton: async () => ({
+        llm: "heuristic",
+        skeleton: {
+          title: "Japan Adventure",
+          originCity: "Jakarta",
+          destinationSummary: "Osaka",
+          assumedStartDate: "2026-10-01",
+          assumedEndDate: "2026-10-04",
+          checkpoints: [
+            {
+              city: "Osaka",
+              countryCode: "JP",
+              role: "STAY" as const,
+              days: 3,
+              needs: ["hotels" as const],
+            },
+          ],
+        },
+      }),
+      executeSkeletonNeeds: async () => ({
+        mcp: "inprocess",
+        checkpoints: [
+          {
+            checkpoint: {
+              city: "Osaka",
+              role: "STAY" as const,
+              days: 3,
+              needs: ["hotels" as const],
+            },
+            results: [
+              {
+                ok: true,
+                tool: "search_hotels",
+                data: {
+                  provider: "mock",
+                  hotels: [{ hotelId: "h1", name: "Hotel A", price: { amount: 50, currency: "USD" } }],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    let rolled = false;
+    const cost = {
+      rollupTrip: async () => {
+        rolled = true;
+      },
+    };
+
+    const service = new JourneyService(db as never, {
+      planner: planner as never,
+      cost: cost as never,
+      policy: {
+        canAiMutate: () => true,
+      } as never,
+    });
+
+    const result = await service.planTrip({
+      tripId: "trip-1",
+      userId: "user-1",
+      prompt: "Liburan ke Osaka",
+    });
+
+    assert.equal(result.llm, "heuristic");
+    assert.equal(result.mcp, "inprocess");
+    assert.ok(created.some((n) => n.type === "CHECKPOINT" && n.title === "Osaka"));
+    assert.ok(created.some((n) => n.type === "BOOKING" && n.title === "Hotel A"));
+    assert.equal(rolled, true);
+    assert.equal(tripRow.status, "ready");
+  });
 });

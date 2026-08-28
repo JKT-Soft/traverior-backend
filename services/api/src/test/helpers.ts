@@ -62,6 +62,7 @@ export function baseEnv(overrides: Record<string, string> = {}) {
     PROVIDER_WEATHER: "mock",
     PROVIDER_EVENTS: "mock",
     PROVIDER_VISA: "static",
+    PROVIDER_IMAGES: "mock",
     ...overrides,
   };
 }

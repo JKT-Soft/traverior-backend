@@ -22,6 +22,13 @@ describe("loadEnv", () => {
     assert.throws(() => loadEnv(baseEnv({ AUTH_MODE: "ldap" })), /AUTH_MODE/);
   });
 
+  it("requires FIREBASE_PROJECT_ID in firebase mode", () => {
+    assert.throws(
+      () => loadEnv(baseEnv({ AUTH_MODE: "firebase" })),
+      /FIREBASE_PROJECT_ID/,
+    );
+  });
+
   it("accepts firebase auth mode and secrets", () => {
     const env = loadEnv(
       baseEnv({
@@ -58,6 +65,8 @@ describe("loadEnv", () => {
     assert.match(env.databaseUrl, /traverior/);
     assert.equal(env.providers.flights, "mock");
     assert.equal(env.providers.visa, "static");
+    assert.equal(env.providers.images, "mock");
+    assert.equal(env.cache.ttl.images, 604_800);
   });
 
   it("parses cache env overrides", () => {
@@ -67,12 +76,18 @@ describe("loadEnv", () => {
         REDIS_URL: "redis://localhost:6379",
         CACHE_TTL_FLIGHTS: "120",
         CACHE_TTL_WEATHER: "not-a-number",
+        CACHE_TTL_IMAGES: "3600",
+        PROVIDER_IMAGES: "unsplash",
+        UNSPLASH_ACCESS_KEY: "u",
       }),
     );
     assert.equal(env.cache.enabled, false);
     assert.equal(env.cache.redisUrl, "redis://localhost:6379");
     assert.equal(env.cache.ttl.flights, 120);
     assert.equal(env.cache.ttl.weather, 1_800);
+    assert.equal(env.cache.ttl.images, 3600);
+    assert.equal(env.providers.images, "unsplash");
+    assert.equal(env.secrets.unsplashAccessKey, "u");
   });
 
   it("selects llm provider from env", () => {
@@ -88,5 +103,10 @@ describe("loadEnv", () => {
 
     const noKey = loadEnv(baseEnv({ OPENAI_API_KEY: "" }));
     assert.equal(noKey.llm.provider, "heuristic");
+  });
+
+  it("parses mcp mode", () => {
+    assert.equal(loadEnv(baseEnv({ MCP_MODE: "stdio" })).mcp.mode, "stdio");
+    assert.equal(loadEnv(baseEnv({})).mcp.mode, "inprocess");
   });
 });

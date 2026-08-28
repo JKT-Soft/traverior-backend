@@ -80,6 +80,34 @@ describe("buildApp", () => {
     await app.close();
   });
 
+  it("requireAuth keeps GET /health public and rejects other routes", async () => {
+    const app = buildApp({
+      requireAuth: true,
+      auth: async (req) => {
+        const header = req.headers.authorization;
+        if (header === "Bearer ok") return { uid: "u1" };
+        return undefined;
+      },
+    });
+    app.get("/health", async (_req, reply) => ok(reply, { ok: true }));
+    app.get("/secret", async (_req, reply) => ok(reply, { secret: true }));
+    await app.ready();
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    assert.equal(health.statusCode, 200);
+
+    const denied = await app.inject({ method: "GET", url: "/secret" });
+    assert.equal(denied.statusCode, 401);
+
+    const allowed = await app.inject({
+      method: "GET",
+      url: "/secret",
+      headers: { authorization: "Bearer ok" },
+    });
+    assert.equal(allowed.statusCode, 200);
+    await app.close();
+  });
+
   it("exposes error message in 500 when exposeErrorDetails is on", async () => {
     const app = buildApp({ exposeErrorDetails: true });
     app.get("/crash", async () => {

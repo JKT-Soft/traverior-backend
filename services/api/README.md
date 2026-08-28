@@ -36,6 +36,7 @@ PROVIDER_ROUTES=google    # or mock
 PROVIDER_WEATHER=openweather
 PROVIDER_EVENTS=mock
 PROVIDER_VISA=static
+PROVIDER_IMAGES=unsplash   # or mock
 ```
 
 ## Quick start
@@ -71,7 +72,7 @@ LOG_LEVEL=info
 
 ## Redis cache (third-party providers + trips)
 
-Flights, hotels, places, routes, weather, events, visa, and trip reads (`/v1/trips`) are cached (cache-aside). Trip writes invalidate related keys.
+Flights, hotels, places, routes, weather, events, visa, images, and trip reads (`/v1/trips`) are cached (cache-aside). Trip writes invalidate related keys.
 
 ```bash
 # from repo root
@@ -89,28 +90,63 @@ CACHE_TTL_WEATHER=1800
 CACHE_TTL_EVENTS=1800
 CACHE_TTL_VISA=604800
 CACHE_TTL_TRIPS=60
+CACHE_TTL_IMAGES=604800
 ```
 
 Without `REDIS_URL`, the API falls back to **in-memory** cache. Set `CACHE_ENABLED=false` to disable.
 
+## Auth
+
+`AUTH_MODE=firebase` (default for local `.env`). The mobile app signs in with **Google via Firebase Auth**, then sends the ID token on every request:
+
+```
+Authorization: Bearer <firebase-id-token>
+```
+
+Only `GET /health` is public (liveness). All `/v1/*` routes return `401` without a valid token.
+
+```env
+AUTH_MODE=firebase
+FIREBASE_PROJECT_ID=your-firebase-project-id
+# optional — service account JSON; verifyIdToken works with project ID
+GOOGLE_APPLICATION_CREDENTIALS=./secrets/firebase-admin.json
+```
+
 ## Example calls
 
 ```bash
-# planner skeleton (LLM Fase 1)
+# liveness (no auth)
+curl http://localhost:3000/health
+
+# planner skeleton
 curl -X POST http://localhost:3000/v1/planner/skeleton \
+  -H "authorization: Bearer $FIREBASE_ID_TOKEN" \
   -H "content-type: application/json" \
   -d '{"prompt":"Liburan ke Jepang peak season budget affordable","preferences":{"originCity":"Jakarta","partySize":2}}'
 
-# flights (mock)
+# location images (Unsplash / mock)
+curl -X POST http://localhost:3000/v1/images/location \
+  -H "authorization: Bearer $FIREBASE_ID_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"location":"Osaka","perPage":3}'
+
+# flights
 curl -X POST http://localhost:3000/v1/flights/search \
+  -H "authorization: Bearer $FIREBASE_ID_TOKEN" \
   -H "content-type: application/json" \
   -d '{"origin":"CGK","destination":"KIX","departureDate":"2026-10-01"}'
 
 # create trip
 curl -X POST http://localhost:3000/v1/trips \
-  -H "authorization: Bearer dev:demo-user" \
+  -H "authorization: Bearer $FIREBASE_ID_TOKEN" \
   -H "content-type: application/json" \
   -d '{"title":"Japan 2026","originCity":"Jakarta","destinationSummary":"Osaka"}'
+
+# plan trip (LLM + MCP + persist pipeline nodes)
+curl -X POST http://localhost:3000/v1/trips/<TRIP_ID>/plan \
+  -H "authorization: Bearer $FIREBASE_ID_TOKEN" \
+  -H "content-type: application/json" \
+  -d '{"prompt":"7 hari Jepang budget affordable","preferences":{"originCity":"Jakarta","partySize":2},"context":{"originIata":"CGK","destinationIata":"KIX","departureDate":"2026-10-01","checkIn":"2026-10-01","checkOut":"2026-10-08"}}'
 ```
 
 ### LLM env
@@ -120,6 +156,29 @@ LLM_PROVIDER=           # empty = openai if OPENAI_API_KEY set, else heuristic
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 ```
+
+### MCP client (Planner Fase 2)
+
+```env
+MCP_MODE=inprocess      # inprocess | stdio
+# MCP_SERVERS_DIR=../mcp
+```
+
+Test MCP tool call:
+
+```bash
+curl http://localhost:3000/v1/planner/tools
+
+curl -X POST http://localhost:3000/v1/planner/tools/call \
+  -H "content-type: application/json" \
+  -d '{"tool":"search_flights","arguments":{"origin":"CGK","destination":"KIX","departureDate":"2026-10-01"}}'
+
+curl -X POST http://localhost:3000/v1/planner/plan \
+  -H "content-type: application/json" \
+  -d '{"prompt":"7 hari Jepang","context":{"checkIn":"2026-10-01","checkOut":"2026-10-08","originIata":"CGK","destinationIata":"KIX","departureDate":"2026-10-01"}}'
+```
+
+Set `MCP_MODE=stdio` to spawn real MCP server processes under `services/mcp` (requires `npx tsx` on PATH).
 
 ## Tests
 

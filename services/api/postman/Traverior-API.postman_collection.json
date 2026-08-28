@@ -2,19 +2,40 @@
   "info": {
     "_postman_id": "a1b2c3d4-e5f6-7890-abcd-traverior0001",
     "name": "Traverior API",
-    "description": "HTTP collection for Traverior modular monolith (Fastify).\n\nAuth (dev): `Authorization: Bearer {{authToken}}` → default `dev:demo-user`.\n\nResponse envelope:\n- success: `{ ok: true, data }`\n- error: `{ ok: false, error: { code, message } }`",
+    "description": "HTTP collection for Traverior modular monolith (Fastify).\n\nAuth: `Authorization: Bearer {{authToken}}` — Firebase ID token from Google Sign-In.\nOnly GET /health is public.\n\nResponse envelope:\n- success: `{ ok: true, data }`\n- error: `{ ok: false, error: { code, message } }`",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3000" },
-    { "key": "authToken", "value": "dev:demo-user" },
-    { "key": "tripId", "value": "" },
-    { "key": "rootNodeId", "value": "" },
-    { "key": "parentId", "value": "" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "authToken",
+      "value": "<firebase-id-token>"
+    },
+    {
+      "key": "tripId",
+      "value": ""
+    },
+    {
+      "key": "rootNodeId",
+      "value": ""
+    },
+    {
+      "key": "parentId",
+      "value": ""
+    }
   ],
   "auth": {
     "type": "bearer",
-    "bearer": [{ "key": "token", "value": "{{authToken}}", "type": "string" }]
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
   },
   "item": [
     {
@@ -23,7 +44,9 @@
         {
           "name": "GET /health",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/health",
@@ -36,9 +59,43 @@
       "name": "Auth",
       "item": [
         {
-          "name": "GET /v1/auth/health",
+          "name": "Get Firebase ID token (email/password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (pm.response.code === 200 && json.idToken) {",
+                  "  pm.environment.set('authToken', json.idToken);",
+                  "  console.log('authToken saved (' + json.email + ')');",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={{firebaseWebApiKey}}",
+              "protocol": "https",
+              "host": ["identitytoolkit", "googleapis", "com"],
+              "path": ["v1", "accounts:signInWithPassword"],
+              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+            },
+            "description": "Jangan kirim Authorization header. Hanya Web API key di query.\nAuth tab request ini HARUS No Auth (collection Traverior memakai Bearer).\nSukses: simpan idToken ke environment authToken otomatis."
+          }
+        },
+        {
+          "name": "GET /v1/auth/health",
+          "request": {
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/auth/health"
@@ -50,7 +107,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/auth/me",
-            "description": "Requires Authorization. Dev mode: Bearer dev:<uid>"
+            "description": "Requires Firebase ID token (Google Sign-In)."
           }
         }
       ]
@@ -61,7 +118,6 @@
         {
           "name": "GET /v1/flights/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/flights/health"
@@ -70,9 +126,13 @@
         {
           "name": "POST /v1/flights/search",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"origin\": \"CGK\",\n  \"destination\": \"KIX\",\n  \"departureDate\": \"2026-10-01\",\n  \"returnDate\": \"2026-10-08\",\n  \"adults\": 1,\n  \"cabinClass\": \"economy\"\n}"
@@ -89,7 +149,6 @@
         {
           "name": "GET /v1/hotels/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/hotels/health"
@@ -98,9 +157,13 @@
         {
           "name": "POST /v1/hotels/search",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"cityName\": \"Osaka\",\n  \"countryCode\": \"JP\",\n  \"checkIn\": \"2026-10-01\",\n  \"checkOut\": \"2026-10-04\",\n  \"adults\": 2,\n  \"currency\": \"IDR\",\n  \"guestNationality\": \"ID\"\n}"
@@ -116,7 +179,6 @@
         {
           "name": "GET /v1/places/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/places/health"
@@ -125,9 +187,13 @@
         {
           "name": "POST /v1/places/search",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"textQuery\": \"Dotonbori Osaka\",\n  \"maxResultCount\": 5\n}"
@@ -138,9 +204,13 @@
         {
           "name": "POST /v1/places/restaurants",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"city\": \"Osaka\",\n  \"dietary\": [\"halal\"]\n}"
@@ -156,7 +226,6 @@
         {
           "name": "GET /v1/routes/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/routes/health"
@@ -165,9 +234,13 @@
         {
           "name": "POST /v1/routes/compute",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"originLat\": 34.6937,\n  \"originLng\": 135.5023,\n  \"destinationLat\": 34.985,\n  \"destinationLng\": 135.758,\n  \"mode\": \"TRANSIT\"\n}"
@@ -184,7 +257,6 @@
         {
           "name": "GET /v1/weather/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/weather/health"
@@ -193,9 +265,13 @@
         {
           "name": "POST /v1/weather/forecast",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"lat\": 34.6937,\n  \"lon\": 135.5023\n}"
@@ -211,7 +287,6 @@
         {
           "name": "GET /v1/events/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/events/health"
@@ -220,9 +295,13 @@
         {
           "name": "POST /v1/events/search",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"city\": \"Osaka\",\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-04\",\n  \"includeFree\": true,\n  \"includePaid\": true\n}"
@@ -238,7 +317,6 @@
         {
           "name": "GET /v1/visa/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/visa/health"
@@ -247,9 +325,13 @@
         {
           "name": "POST /v1/visa/requirements",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"passportCountry\": \"ID\",\n  \"destinationCountry\": \"JP\",\n  \"travelDate\": \"2026-10-01\"\n}"
@@ -265,7 +347,6 @@
         {
           "name": "GET /v1/checklist/health",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/v1/checklist/health"
@@ -274,9 +355,13 @@
         {
           "name": "POST /v1/checklist/generate",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"destination\": \"Osaka\",\n  \"passportCountry\": \"ID\",\n  \"visaDocuments\": [\"passport\", \"photo\"]\n}"
@@ -292,9 +377,13 @@
         {
           "name": "POST /v1/planner/enrich-city",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"city\": \"Osaka\",\n  \"countryCode\": \"JP\",\n  \"checkIn\": \"2026-10-01\",\n  \"checkOut\": \"2026-10-04\",\n  \"originLat\": -6.2088,\n  \"originLng\": 106.8456,\n  \"destLat\": 34.6937,\n  \"destLng\": 135.5023,\n  \"passportCountry\": \"ID\",\n  \"destinationCountry\": \"JP\"\n}"
@@ -339,7 +428,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Japan 2026\",\n  \"originCity\": \"Jakarta\",\n  \"destinationSummary\": \"Osaka · Kyoto\",\n  \"startDate\": \"2026-10-01\",\n  \"endDate\": \"2026-10-08\",\n  \"partySize\": 2\n}"
@@ -363,8 +457,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/trips/{{tripId}}/nodes?parentId={{parentId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "trips", "{{tripId}}", "nodes"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "trips",
+                "{{tripId}}",
+                "nodes"
+              ],
               "query": [
                 {
                   "key": "parentId",
@@ -387,7 +488,12 @@
           "name": "POST /v1/trips/:tripId/nodes",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"parentId\": \"{{rootNodeId}}\",\n  \"type\": \"CHECKPOINT\",\n  \"title\": \"Osaka Stay\",\n  \"contentType\": \"checkpoint\",\n  \"content\": { \"role\": \"STAY\", \"days\": 3 },\n  \"costAmount\": 0,\n  \"costCurrency\": \"IDR\",\n  \"durationMinutes\": 4320\n}"

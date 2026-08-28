@@ -6,7 +6,8 @@ import Fastify, {
 } from "fastify";
 import type { IncomingMessage } from "node:http";
 import type { Logger } from "pino";
-import { AppError } from "./errors.js";
+import { AppError, UnauthorizedError } from "./errors.js";
+import { isPublicRoute } from "./public-route.js";
 import { fail } from "./reply.js";
 
 export type AuthUser = { uid: string; email?: string };
@@ -23,6 +24,8 @@ declare module "fastify" {
 
 export type BuildAppOptions = {
   auth?: AuthResolver;
+  /** Reject unauthenticated requests except GET /health. */
+  requireAuth?: boolean;
   /** false = silent; true = default pino stdout; Logger = custom (e.g. file logger) */
   logger?: boolean | Logger | FastifyBaseLogger;
   /** When true, 500 responses include err.message (dev only). */
@@ -150,6 +153,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const resolveAuth = options.auth;
     app.addHook("onRequest", async (req) => {
       req.user = await resolveAuth(req.raw);
+    });
+  }
+
+  if (options.requireAuth) {
+    app.addHook("preHandler", async (req) => {
+      if (isPublicRoute(req.method, req.url)) return;
+      if (!req.user) throw new UnauthorizedError();
     });
   }
 

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AppError, ValidationError } from "../../shared/http/errors.js";
+import { InProcessMcpClient } from "../../shared/mcp/index.js";
 import { createMockFn } from "../../test/helpers.js";
 import type { LlmClient } from "./domain/ports.js";
 import { HeuristicLlmClient } from "./infra/heuristic-llm.js";
 import { PlannerService } from "./service.js";
 
-function domainDeps(llm: LlmClient) {
+function domainServices() {
   return {
-    llm,
     flights: { search: createMockFn(async () => []), providerName: "mock" },
-    hotels: { search: createMockFn(async () => []), providerName: "mock" },
-    places: { searchRestaurants: createMockFn(async () => []), providerName: "mock" },
+    hotels: { search: createMockFn(async () => [{ id: "h1" }]), providerName: "mock" },
+    places: { searchRestaurants: createMockFn(async () => []), providerName: "mock", searchPois: createMockFn(async () => []), search: createMockFn(async () => []) },
     routes: {
       getRoute: createMockFn(async () => ({ durationMinutes: 1 })),
       providerName: "mock",
@@ -32,8 +32,17 @@ function domainDeps(llm: LlmClient) {
   };
 }
 
+function domainDeps(llm: LlmClient) {
+  const services = domainServices();
+  return {
+    llm,
+    mcp: new InProcessMcpClient(services),
+    ...services,
+  };
+}
+
 describe("PlannerService", () => {
-  it("enrichCity with and without coords", async () => {
+  it("enrichCity with and without coords via MCP", async () => {
     const deps = domainDeps(new HeuristicLlmClient());
     const planner = new PlannerService(deps as never);
     const withCoords = await planner.enrichCity({
@@ -48,7 +57,9 @@ describe("PlannerService", () => {
       passportCountry: "ID",
       destinationCountry: "JP",
     });
+    assert.equal(withCoords.mcp, "inprocess");
     assert.ok(withCoords.route);
+    assert.ok(deps.hotels.search.mock.calls.length > 0);
     assert.ok(deps.weather.getForecast.mock.calls.length > 0);
 
     const noCoords = await planner.enrichCity({
@@ -58,6 +69,28 @@ describe("PlannerService", () => {
     });
     assert.equal(noCoords.route, null);
     assert.equal(noCoords.weather, null);
+  });
+
+  it("executeSkeletonNeeds runs MCP tools", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const out = await planner.executeSkeletonNeeds(
+      {
+        title: "Osaka",
+        checkpoints: [
+          {
+            city: "Osaka",
+            countryCode: "JP",
+            role: "STAY",
+            days: 2,
+            needs: ["hotels", "visa", "checklist"],
+          },
+        ],
+      },
+      { checkIn: "2026-10-01", checkOut: "2026-10-03", passportCountry: "ID" },
+    );
+    assert.equal(out.mcp, "inprocess");
+    assert.equal(out.checkpoints.length, 1);
+    assert.ok(out.checkpoints[0]!.results.some((r) => r.tool === "search_hotels" && r.ok));
   });
 
   it("planSkeleton via heuristic llm", async () => {

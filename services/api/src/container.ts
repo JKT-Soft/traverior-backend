@@ -6,6 +6,7 @@ import { CostService } from "./modules/cost/service.js";
 import { createEventModule } from "./modules/events/index.js";
 import { createFlightModule } from "./modules/flights/index.js";
 import { createHotelModule } from "./modules/hotels/index.js";
+import { createImageModule } from "./modules/images/index.js";
 import { createJourneyModule } from "./modules/journey/index.js";
 import { createPlaceModule } from "./modules/places/index.js";
 import { createPlannerRoutes } from "./modules/planner/http.js";
@@ -16,6 +17,7 @@ import { createRouteModule } from "./modules/routes/index.js";
 import { createVisaModule } from "./modules/visa/index.js";
 import { createWeatherModule } from "./modules/weather/index.js";
 import { createCacheStore, type CacheStore } from "./shared/cache/index.js";
+import { createMcpClient, type McpToolClient } from "./shared/mcp/index.js";
 import { buildApp, type AuthResolver } from "./shared/http/app.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
@@ -24,6 +26,7 @@ export type AppContainer = {
   env: Env;
   app: FastifyInstance;
   cache: CacheStore;
+  mcp: McpToolClient;
   resolveAuth: AuthResolver;
   services: {
     auth: ReturnType<typeof createAuthModule>["service"];
@@ -34,6 +37,7 @@ export type AppContainer = {
     weather: ReturnType<typeof createWeatherModule>["service"];
     events: ReturnType<typeof createEventModule>["service"];
     visa: ReturnType<typeof createVisaModule>["service"];
+    images: ReturnType<typeof createImageModule>["service"];
     checklist: ReturnType<typeof createChecklistModule>["service"];
     journey: ReturnType<typeof createJourneyModule>["service"];
     cost: CostService;
@@ -53,14 +57,12 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   const weather = createWeatherModule(env, cache);
   const events = createEventModule(env, cache);
   const visa = createVisaModule(env, cache);
+  const images = createImageModule(env, cache);
   const checklist = createChecklistModule();
-  const journey = createJourneyModule({ env, cache });
   const cost = new CostService();
   const policy = new PolicyService();
   const llm = createLlmClient(env);
-
-  const planner = new PlannerService({
-    llm,
+  const mcp = createMcpClient(env, {
     flights: flights.service,
     hotels: hotels.service,
     places: places.service,
@@ -71,10 +73,33 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     checklist: checklist.service,
   });
 
+  const planner = new PlannerService({
+    llm,
+    mcp,
+    flights: flights.service,
+    hotels: hotels.service,
+    places: places.service,
+    routes: routes.service,
+    weather: weather.service,
+    events: events.service,
+    visa: visa.service,
+    checklist: checklist.service,
+  });
+
+  const journey = createJourneyModule({
+    env,
+    cache,
+    planner,
+    cost,
+    policy,
+    images: images.service,
+  });
+
   const isDev = env.nodeEnv !== "production" && env.nodeEnv !== "test";
   const enableFileLogs = env.nodeEnv !== "test";
   const app = buildApp({
     auth: auth.resolveAuth,
+    requireAuth: true,
     logger: enableFileLogs
       ? createFileLogger({
           dir: env.logDir,
@@ -87,6 +112,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
 
   app.addHook("onClose", async () => {
     await cache.quit?.();
+    await mcp.close?.();
   });
 
   app.get("/health", async (_req, reply) => {
@@ -99,6 +125,11 @@ export async function createContainer(env: Env): Promise<AppContainer> {
         provider: env.llm.provider,
         model: env.llm.model,
         client: llm.name,
+      },
+      mcp: {
+        mode: env.mcp.mode,
+        client: mcp.name,
+        serversDir: env.mcp.serversDir,
       },
       cache: {
         enabled: env.cache.enabled,
@@ -116,6 +147,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   await app.register(weather.routes, { prefix: "/v1/weather" });
   await app.register(events.routes, { prefix: "/v1/events" });
   await app.register(visa.routes, { prefix: "/v1/visa" });
+  await app.register(images.routes, { prefix: "/v1/images" });
   await app.register(checklist.routes, { prefix: "/v1/checklist" });
   await app.register(journey.routes, { prefix: "/v1/trips" });
   await app.register(createPlannerRoutes(planner), { prefix: "/v1/planner" });
@@ -124,6 +156,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     env,
     app,
     cache,
+    mcp,
     resolveAuth: auth.resolveAuth,
     services: {
       auth: auth.service,
@@ -134,6 +167,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
       weather: weather.service,
       events: events.service,
       visa: visa.service,
+      images: images.service,
       checklist: checklist.service,
       journey: journey.service,
       cost,

@@ -17,6 +17,10 @@ function envWith(cache: Partial<Env["cache"]>): Env {
       provider: "heuristic",
       model: "gpt-4o-mini",
     },
+    mcp: {
+      mode: "inprocess",
+      serversDir: "../mcp",
+    },
     cache: {
       enabled: true,
       ttl: {
@@ -28,6 +32,7 @@ function envWith(cache: Partial<Env["cache"]>): Env {
         events: 1,
         visa: 1,
         trips: 1,
+        images: 1,
       },
       ...cache,
     },
@@ -39,6 +44,7 @@ function envWith(cache: Partial<Env["cache"]>): Env {
       weather: "mock",
       events: "mock",
       visa: "static",
+      images: "mock",
     },
     secrets: {},
   };

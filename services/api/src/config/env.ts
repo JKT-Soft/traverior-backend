@@ -17,6 +17,7 @@ export type Env = {
       events: number;
       visa: number;
       trips: number;
+      images: number;
     };
   };
   firebaseProjectId?: string;
@@ -27,6 +28,13 @@ export type Env = {
     model: string;
     baseUrl?: string;
   };
+  mcp: {
+    /** inprocess = call domain services; stdio = spawn MCP server processes */
+    mode: "inprocess" | "stdio";
+    serversDir: string;
+    runnerCommand?: string;
+    runnerArgsPrefix?: string[];
+  };
   providers: {
     flights: string;
     hotels: string;
@@ -35,6 +43,7 @@ export type Env = {
     weather: string;
     events: string;
     visa: string;
+    images: string;
   };
   secrets: {
     duffelAccessToken?: string;
@@ -45,6 +54,7 @@ export type Env = {
     viatorApiKey?: string;
     sherpaApiKey?: string;
     exchangeRateApiKey?: string;
+    unsplashAccessKey?: string;
   };
 };
 
@@ -61,10 +71,25 @@ function boolEnv(source: NodeJS.ProcessEnv, key: string, fallback: boolean): boo
   return raw === "1" || raw.toLowerCase() === "true";
 }
 
+import path from "node:path";
+
+function defaultMcpServersDir(): string {
+  return path.resolve(process.cwd(), "../mcp");
+}
+
+function mcpMode(source: NodeJS.ProcessEnv): Env["mcp"]["mode"] {
+  const raw = (source.MCP_MODE ?? "").toLowerCase();
+  if (raw === "stdio" || raw === "inprocess") return raw;
+  return "inprocess";
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const authMode = (source.AUTH_MODE ?? "dev") as Env["authMode"];
   if (authMode !== "dev" && authMode !== "firebase") {
     throw new Error(`Invalid AUTH_MODE: ${authMode}`);
+  }
+  if (authMode === "firebase" && !source.FIREBASE_PROJECT_ID?.trim()) {
+    throw new Error("FIREBASE_PROJECT_ID is required when AUTH_MODE=firebase");
   }
 
   const openaiApiKey = source.OPENAI_API_KEY;
@@ -97,14 +122,23 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
         events: intEnv(source, "CACHE_TTL_EVENTS", 1_800),
         visa: intEnv(source, "CACHE_TTL_VISA", 604_800),
         trips: intEnv(source, "CACHE_TTL_TRIPS", 60),
+        images: intEnv(source, "CACHE_TTL_IMAGES", 604_800),
       },
     },
-    firebaseProjectId: source.FIREBASE_PROJECT_ID,
+    firebaseProjectId: source.FIREBASE_PROJECT_ID?.trim() || undefined,
     openaiApiKey,
     llm: {
       provider: llmProvider,
       model: source.OPENAI_MODEL ?? "gpt-4o-mini",
       baseUrl: source.OPENAI_BASE_URL,
+    },
+    mcp: {
+      mode: mcpMode(source),
+      serversDir: source.MCP_SERVERS_DIR ?? defaultMcpServersDir(),
+      runnerCommand: source.MCP_RUNNER_COMMAND,
+      runnerArgsPrefix: source.MCP_RUNNER_ARGS
+        ? source.MCP_RUNNER_ARGS.split(",").map((s) => s.trim()).filter(Boolean)
+        : undefined,
     },
     providers: {
       flights: source.PROVIDER_FLIGHTS ?? "mock",
@@ -114,6 +148,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       weather: source.PROVIDER_WEATHER ?? "mock",
       events: source.PROVIDER_EVENTS ?? "mock",
       visa: source.PROVIDER_VISA ?? "static",
+      images: source.PROVIDER_IMAGES ?? "mock",
     },
     secrets: {
       duffelAccessToken: source.DUFFEL_ACCESS_TOKEN,
@@ -124,6 +159,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       viatorApiKey: source.VIATOR_API_KEY,
       sherpaApiKey: source.SHERPA_API_KEY,
       exchangeRateApiKey: source.EXCHANGERATE_API_KEY,
+      unsplashAccessKey: source.UNSPLASH_ACCESS_KEY,
     },
   };
 }
