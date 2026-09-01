@@ -11,6 +11,10 @@ describe("createContainer", () => {
     assert.equal(health.statusCode, 200);
     assert.equal(health.json().data.service, "traverior-api");
     assert.equal(health.json().data.framework, "fastify");
+    assert.equal(health.json().data.providerPings.status, "ok");
+    assert.equal(health.json().data.mark, "✅");
+    assert.equal(health.json().data.providerPings.mark, "✅");
+    assert.ok(health.json().data.providerPings.checks.every((c: { mark: string }) => c.mark === "✅"));
     assert.equal(container.services.auth.providerName, "dev");
     assert.equal(typeof container.resolveAuth, "function");
 

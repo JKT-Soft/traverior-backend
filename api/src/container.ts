@@ -19,6 +19,7 @@ import { createWeatherModule } from "./modules/weather/index.js";
 import { createCacheStore, type CacheStore } from "./shared/cache/index.js";
 import { createMcpClient, type McpToolClient } from "./shared/mcp/index.js";
 import { buildApp, type AuthResolver } from "./shared/http/app.js";
+import { pingExternalProviders } from "./shared/health/provider-ping.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
 
@@ -116,8 +117,10 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   });
 
   app.get("/health", async (_req, reply) => {
+    const providerPings = await pingExternalProviders(env);
     return ok(reply, {
       service: "traverior-api",
+      mark: providerPings.mark,
       architecture: "modular-monolith",
       framework: "fastify",
       auth: env.authMode,
@@ -137,6 +140,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
         ttl: env.cache.ttl,
       },
       providers: env.providers,
+      providerPings,
     });
   });
   await app.register(auth.routes, { prefix: "/v1/auth" });

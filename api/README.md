@@ -52,7 +52,7 @@ npx prisma migrate dev --name init
 npm run dev
 ```
 
-Health: `GET http://localhost:3000/health`
+Health: `GET http://localhost:3000/health` (liveness + ping singkat ke provider external yang aktif)
 
 Auth (dev): header `Authorization: Bearer dev:demo-user`
 
@@ -115,7 +115,7 @@ GOOGLE_APPLICATION_CREDENTIALS=./secrets/firebase-admin.json
 ## Example calls
 
 ```bash
-# liveness (no auth)
+# liveness + ping provider external (no auth)
 curl http://localhost:3000/health
 
 # planner skeleton

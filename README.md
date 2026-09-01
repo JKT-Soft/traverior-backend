@@ -52,7 +52,7 @@ npx prisma migrate dev
 npm run dev
 ```
 
-Health: `GET http://localhost:3000/health`
+Health: `GET http://localhost:3000/health` — liveness, plus ping singkat ke provider yang sedang dipakai.
 
 Auth lokal: set `AUTH_MODE=dev` lalu kirim `Authorization: Bearer dev:<firebaseUid>`. Mode default di `.env.example` adalah `firebase` (token ID dari Google Sign-In).
 
