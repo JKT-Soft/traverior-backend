@@ -1,83 +1,126 @@
-# Traverior — Indeks Dokumen & Desain
+# Traverior Backend
 
-**Brand locked:** Traverior · Domain target: [traverior.com](https://traverior.com)  
-**Tagline:** *Your journey, in flow.*
+API orchestrator dan MCP servers untuk **Traverior** — *Your journey, in flow.*
 
-Semua dokumen perencanaan dan aset UI/UX dari sesi perancangan.
+Repo ini adalah modular monolith: satu Fastify API yang merakit journey pipeline, plus sidecar MCP per domain (flight, hotel, places, dll.).
 
-## Tech Stack (Locked)
+Domain: [traverior.com](https://traverior.com)
 
-| Layer | Stack |
-|-------|--------|
-| Mobile | Flutter |
-| Backend | Node.js (no framework) |
-| DB | PostgreSQL + Prisma |
-| Auth | Firebase |
-| Infra | Docker + Linux VPS |
-| CI/CD | Git + GitHub Actions |
+## Stack
 
-Detail: [docs/07-tech-stack.md](./docs/07-tech-stack.md)
+| Layer | Teknologi |
+|-------|-----------|
+| API | Node.js 20+ · Fastify · TypeScript |
+| Database | PostgreSQL · Prisma |
+| Cache | Redis (opsional; fallback in-memory) |
+| Auth | Firebase Authentication |
+| Tools | MCP servers (`mcp/`) |
+| Infra | Docker Compose · Linux VPS |
+| CI/CD | GitHub Actions |
 
-## Dokumen (`docs/`)
-
-| File | Isi |
-|------|-----|
-| [01-product-design.md](./docs/01-product-design.md) | Visi, modul, arsitektur, roadmap, KPI |
-| [02-pipeline-model.md](./docs/02-pipeline-model.md) | Pipeline rekursif & data model |
-| [03-architecture-tools.md](./docs/03-architecture-tools.md) | MCP servers, LLM, modular monolith |
-| [04-ui-ux-design.md](./docs/04-ui-ux-design.md) | Design system & screen map |
-| [05-custom-pipeline-editing.md](./docs/05-custom-pipeline-editing.md) | Add/Edit/Delete/Lock pipeline |
-| [06-weekly-plan.md](./docs/06-weekly-plan.md) | Reset planning 8 minggu (teknikal + non-teknikal) |
-| [07-tech-stack.md](./docs/07-tech-stack.md) | Tech stack locked (Flutter, Node vanilla, Prisma, Firebase, Docker VPS, GH Actions) |
-| [10-api-cost-estimate.md](./docs/10-api-cost-estimate.md) | Estimasi biaya konsumsi API |
-| [11-database-design.md](./docs/11-database-design.md) | Database design PostgreSQL + Prisma schema |
-| [12-mcp-third-party-apis.md](./docs/12-mcp-third-party-apis.md) | API third-party per MCP server (endpoint + tools) |
-
-## Desain (`design/`)
-
-### Mockups (`design/mockups/`)
-
-| File | Layar |
-|------|-------|
-| `traverior-ui-home.png` | Home |
-| `traverior-ui-planning.png` | AI Planning |
-| `traverior-ui-pipeline.png` | Journey Pipeline (view) |
-| `traverior-ui-pipeline-edit.png` | Journey Pipeline (edit mode) |
-| `traverior-ui-checkpoint.png` | Checkpoint Detail (view) |
-| `traverior-ui-checkpoint-edit.png` | Checkpoint Edit Mode |
-| `traverior-ui-today.png` | Today Mode |
-| `traverior-ui-action-sheet.png` | Action Sheet (Edit/Ganti/Kunci/Hapus) |
-| `traverior-ui-add-node.png` | Add Node bottom sheet |
-| `traverior-ui-edit-validation.png` | Validasi konflik |
-| `traverior-ui-overview.png` | Overview v1 (4 layar) |
-| `traverior-ui-overview-v2.png` | Overview v2 (+ custom editing) |
-
-### Referensi (`design/references/`)
-
-| File | Isi |
-|------|-----|
-| `journey-pipeline-workflow.png` | Diagram workflow pipeline asli (Jakarta → Asia Timur) |
-
-### Prototype
-
-| File | Isi |
-|------|-----|
-| `design/travel-agent-ui-ux.canvas.tsx` | Prototype interaktif Cursor Canvas |
-
-## Struktur Folder
+## Struktur
 
 ```
-AI travel agent/
-├── README.md
-├── docker-compose.yml
-├── docs/
-├── design/
-└── services/
-    ├── api/                 # Modular monolith (Node + Prisma)
-    │   ├── prisma/
-    │   ├── src/modules/
-    │   └── README.md
-    └── mcp/                 # MCP servers per domain (stdio tools)
-        ├── src/{flights,hotels,places,routes,weather,events,visa,checklist}/
-        └── README.md
+.
+├── api/                    # Fastify modular monolith
+│   ├── prisma/             # schema + migrations
+│   ├── src/modules/        # flights, hotels, journey, planner, …
+│   ├── Dockerfile
+│   └── .env.example
+├── mcp/                    # MCP servers (stdio, stateless)
+│   └── src/{flights,hotels,places,routes,weather,events,visa,checklist}/
+├── docker-compose.yml      # API container
+└── .github/workflows/      # CI + deploy VPS
 ```
+
+Detail modul: [api/README.md](./api/README.md) · katalog tool: [mcp/README.md](./mcp/README.md)
+
+## Jalankan lokal
+
+Prasyarat: **Node.js ≥ 20**, PostgreSQL, Redis (opsional).
+
+```bash
+cp api/.env.example api/.env
+# isi DATABASE_URL, Firebase, dan provider keys
+```
+
+```bash
+cd api
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run dev
+```
+
+Health: `GET http://localhost:3000/health`
+
+Auth lokal: set `AUTH_MODE=dev` lalu kirim `Authorization: Bearer dev:<firebaseUid>`. Mode default di `.env.example` adalah `firebase` (token ID dari Google Sign-In).
+
+MCP (stdio), dari folder `mcp/`:
+
+```bash
+cd mcp
+npm install
+npm run flights    # atau hotels, places, routes, weather, events, visa, checklist
+```
+
+API memakai `MCP_MODE=inprocess` secara default (panggil domain service langsung). Set `MCP_MODE=stdio` untuk spawn proses di `mcp/`.
+
+## Docker
+
+Compose mem-publish API di **host `8002`** → container `3000`. Butuh `api/.env` (tidak di-commit).
+
+```bash
+docker compose up -d --build
+curl http://localhost:8002/health
+```
+
+Migrasi di container:
+
+```bash
+docker compose run --rm --no-deps api npx prisma migrate deploy
+```
+
+Postgres dan Redis tidak ada di compose ini — jalankan terpisah, lalu arahkan `DATABASE_URL` / `REDIS_URL` di `api/.env`.
+
+## Tes
+
+```bash
+# API
+cd api && npm test && npm run lint
+
+# MCP
+cd mcp && npm test && npm run lint
+```
+
+Coverage: `npm run test:coverage` di masing-masing paket (threshold 100%).
+
+## CI/CD
+
+| Workflow | Trigger | Isi |
+|----------|---------|-----|
+| [CI](./.github/workflows/ci.yml) | PR, push branch, manual | typecheck + test API & MCP, build image Docker |
+| [Deploy to VPS](./.github/workflows/deploy.yml) | push `main` / `master`, manual | CI → SSH → `git pull` → migrate → `docker compose up -d` |
+
+Push ke `main` menjalankan CI dulu, baru deploy. Deploy tidak jalan di PR.
+
+### Secrets (repo GitHub)
+
+| Secret | Wajib | Keterangan |
+|--------|--------|------------|
+| `VPS_HOST` | ya | hostname atau IP |
+| `VPS_USER` | ya | user SSH |
+| `VPS_SSH_PRIVATE_KEY` | ya | private key user itu |
+| `VPS_DEPLOY_PATH` | ya | path absolut clone repo **backend** di VPS |
+| `VPS_PORT` | tidak | port SSH, default `22` |
+| `GH_PAT` | tidak | PAT untuk repo organisasi yang private |
+
+Di VPS, `api/.env` tetap di server (bukan di git). `VPS_DEPLOY_PATH` harus mengarah ke clone backend, bukan landing page.
+
+## Dokumentasi lain
+
+| File | Isi |
+|------|-----|
+| [api/README.md](./api/README.md) | Arsitektur modul, env, contoh curl |
+| [mcp/README.md](./mcp/README.md) | Tool catalog per server |
+| [api/postman/README.md](./api/postman/README.md) | Koleksi Postman |
