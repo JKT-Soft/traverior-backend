@@ -10,9 +10,9 @@ import {
 } from "./runtime.js";
 
 describe("apiSrc / importApi", () => {
-  it("resolves into services/api/src", () => {
+  it("resolves into api/src", () => {
     const resolved = apiSrc("config/env.ts");
-    assert.match(resolved.replace(/\\/g, "/"), /services\/api\/src\/config\/env\.ts$/);
+    assert.match(resolved.replace(/\\/g, "/"), /\/api\/src\/config\/env\.ts$/);
   });
 
   it("dynamically imports an API module", async () => {

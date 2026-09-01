@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export type ImportApi = <T>(relativeFromApiSrc: string) => Promise<T>;
 
-/** Resolve a file under services/api/src */
+/** Resolve a file under api/src */
 export function apiSrc(relativeFromApiSrc: string): string {
   return path.resolve(__dirname, "../../../api/src", relativeFromApiSrc);
 }
