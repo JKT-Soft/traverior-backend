@@ -1,10 +1,10 @@
 services:
   api:
     build:
-      context: ./services/api
+      context: ./api
       dockerfile: Dockerfile
     container_name: traverior-api
     env_file:
-      - ./services/api/.env
+      - ./api/.env
     ports:
-      - "3000:3000"
+      - "8002:3000"

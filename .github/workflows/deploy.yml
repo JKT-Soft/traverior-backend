@@ -1,0 +1,100 @@
+# Required GitHub secrets (same pattern as traverior-web):
+#   VPS_HOST              — server hostname or IP
+#   VPS_USER              — SSH user
+#   VPS_SSH_PRIVATE_KEY   — private key for that user
+#   VPS_DEPLOY_PATH       — absolute path to this repo clone on the VPS
+# Optional:
+#   VPS_PORT              — SSH port (default 22)
+#   GH_PAT                — PAT for private org repos (contents:read)
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Verify
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy (Docker Compose)
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: GH_PAT
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            DEPLOY_PATH="${{ secrets.VPS_DEPLOY_PATH }}"
+            if [ -z "$DEPLOY_PATH" ]; then
+              echo "Missing secret VPS_DEPLOY_PATH"
+              exit 1
+            fi
+
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "Deploy path is not a git repository: $DEPLOY_PATH"
+              exit 1
+            fi
+
+            cd "$DEPLOY_PATH"
+
+            echo "==> Preparing git remote for organization repo"
+            ORIGIN_URL="$(git remote get-url origin)"
+            cleanup() {
+              git remote set-url origin "$ORIGIN_URL" >/dev/null 2>&1 || true
+            }
+            trap cleanup EXIT
+
+            if [ -n "${GH_PAT:-}" ]; then
+              if echo "$ORIGIN_URL" | grep -Eq 'github\.com[:/].+/.+'; then
+                REPO_PATH="$(echo "$ORIGIN_URL" | sed -E 's#.*github\.com[:/]##; s#\.git$##')"
+                git remote set-url origin "https://x-access-token:${GH_PAT}@github.com/${REPO_PATH}.git"
+              else
+                echo "Unsupported origin URL: $ORIGIN_URL"
+                exit 1
+              fi
+            fi
+
+            echo "==> Fetching latest code"
+            git fetch --prune origin
+            DEFAULT_BRANCH="$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')"
+            git checkout "$DEFAULT_BRANCH"
+            git reset --hard "origin/$DEFAULT_BRANCH"
+
+            echo "==> Building images"
+            docker compose build
+
+            echo "==> Applying Prisma migrations"
+            docker compose run --rm --no-deps api npx prisma migrate deploy
+
+            echo "==> Restarting containers"
+            docker compose up -d --remove-orphans
+
+            echo "==> Cleaning unused images"
+            docker image prune -f
+
+            echo "==> Container status"
+            docker compose ps
+
+            echo "==> Recent logs"
+            docker compose logs --tail=40 api
