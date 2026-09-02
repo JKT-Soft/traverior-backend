@@ -1,7 +1,13 @@
 import type { CheckpointKind, NodeType, Prisma } from "@prisma/client";
 import type { CheckpointToolResults } from "../../planner/service.js";
+import { DEFAULT_ORIGIN_CITY } from "../../planner/domain/normalize-skeleton.js";
 import type { SkeletonCheckpoint, TripSkeleton } from "../../planner/domain/skeleton.js";
 import type { McpToolResult } from "../../../shared/mcp/index.js";
+
+export type BuildPlanNodeDraftsOptions = {
+  originCity?: string;
+  returnCity?: string;
+};
 
 export type PlannedNodeDraft = {
   /** Explicit node path (parentPath is derived as dirname). */
@@ -254,15 +260,87 @@ function toolToNodeDraft(
   }
 }
 
+function citiesEqual(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function uniqueSlug(base: string, used: Set<string>, fallback: string): string {
+  let slug = slugify(base);
+  if (!used.has(slug)) {
+    used.add(slug);
+    return slug;
+  }
+  let index = 2;
+  while (used.has(`${slug}-${index}`)) index += 1;
+  slug = `${slug}-${index}`;
+  used.add(slug);
+  return slug;
+}
+
+function hubCheckpointDraft(
+  path: string,
+  city: string,
+  kind: "ORIGIN" | "RETURN",
+): PlannedNodeDraft {
+  return {
+    path,
+    type: "CHECKPOINT",
+    checkpointKind: kind,
+    title: kind === "RETURN" ? `Return to ${city}` : city,
+    subtitle: kind === "ORIGIN" ? "Departure" : "Return",
+    contentType: "checkpoint",
+    content: {
+      city,
+      role: kind,
+      hub: true,
+    },
+    origin: "ai",
+    isCustom: false,
+  };
+}
+
+function legDraft(path: string, title: string, subtitle: string): PlannedNodeDraft {
+  return {
+    path,
+    type: "LEG",
+    title,
+    subtitle,
+    contentType: "leg",
+    origin: "ai",
+    isCustom: false,
+  };
+}
+
 /** Flatten skeleton + MCP results into ordered node drafts (parent before children). */
 export function buildPlanNodeDrafts(
   skeleton: TripSkeleton,
   execution: { checkpoints: CheckpointToolResults[] },
+  options: BuildPlanNodeDraftsOptions = {},
 ): PlannedNodeDraft[] {
   const drafts: PlannedNodeDraft[] = [];
   const usedSlugs = new Set<string>();
+  const originCity = options.originCity ?? skeleton.originCity ?? DEFAULT_ORIGIN_CITY;
+  const returnCity = options.returnCity ?? originCity;
+  const destinations = skeleton.checkpoints;
 
-  skeleton.checkpoints.forEach((checkpoint, index) => {
+  if (originCity && destinations.length > 0) {
+    const originSlug = uniqueSlug(`${originCity}-origin`, usedSlugs, "origin");
+    drafts.push(hubCheckpointDraft(`trip/${originSlug}`, originCity, "ORIGIN"));
+
+    const firstDestination = destinations[0]!;
+    if (!citiesEqual(firstDestination.city, originCity)) {
+      const legSlug = uniqueSlug(`leg-to-${firstDestination.city}`, usedSlugs, "leg-outbound");
+      drafts.push(
+        legDraft(
+          `trip/${legSlug}`,
+          `Flight to ${firstDestination.city}`,
+          `From ${originCity}`,
+        ),
+      );
+    }
+  }
+
+  destinations.forEach((checkpoint, index) => {
     let slug = slugify(checkpoint.city);
     if (usedSlugs.has(slug)) slug = `${slug}-${index + 1}`;
     usedSlugs.add(slug);
@@ -295,6 +373,23 @@ export function buildPlanNodeDrafts(
       if (child) drafts.push(child);
     });
   });
+
+  if (returnCity && destinations.length > 0) {
+    const lastDestination = destinations[destinations.length - 1]!;
+    if (!citiesEqual(lastDestination.city, returnCity)) {
+      const legSlug = uniqueSlug(`leg-return-${returnCity}`, usedSlugs, "leg-return");
+      drafts.push(
+        legDraft(
+          `trip/${legSlug}`,
+          `Return to ${returnCity}`,
+          `From ${lastDestination.city}`,
+        ),
+      );
+    }
+
+    const returnSlug = uniqueSlug(`${returnCity}-return`, usedSlugs, "return");
+    drafts.push(hubCheckpointDraft(`trip/${returnSlug}`, returnCity, "RETURN"));
+  }
 
   return drafts;
 }

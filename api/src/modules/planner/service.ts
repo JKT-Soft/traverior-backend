@@ -7,6 +7,7 @@ import {
   type SkeletonCheckpoint,
   type TripSkeleton,
 } from "./domain/skeleton.js";
+import { normalizeTripSkeleton, type NormalizeSkeletonOptions } from "./domain/normalize-skeleton.js";
 import type { FlightService } from "../flights/application/service.js";
 import type { HotelService } from "../hotels/application/service.js";
 import type { PlaceService } from "../places/application/service.js";
@@ -63,7 +64,10 @@ export class PlannerService {
   /**
    * Fase 1 — natural language → trip skeleton JSON (checkpoints + needs).
    */
-  async planSkeleton(input: PlanSkeletonInput): Promise<{
+  async planSkeleton(
+    input: PlanSkeletonInput,
+    normalizeOptions: NormalizeSkeletonOptions = {},
+  ): Promise<{
     skeleton: TripSkeleton;
     llm: string;
   }> {
@@ -95,7 +99,10 @@ export class PlannerService {
       );
     }
 
-    return { skeleton: skeleton.data, llm: this.deps.llm.name };
+    return {
+      skeleton: normalizeTripSkeleton(skeleton.data, normalizeOptions),
+      llm: this.deps.llm.name,
+    };
   }
 
   /**

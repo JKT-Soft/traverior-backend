@@ -233,10 +233,19 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
-      const { skeleton, llm } = await this.planner.planSkeleton({
-        prompt: input.prompt,
-        preferences: input.preferences,
-      });
+      const { skeleton, llm } = await this.planner.planSkeleton(
+        {
+          prompt: input.prompt,
+          preferences: {
+            ...input.preferences,
+            originCity: input.preferences?.originCity ?? trip.originCity ?? undefined,
+          },
+        },
+        {
+          tripOriginCity: trip.originCity,
+          preferences: input.preferences,
+        },
+      );
 
       const context: PlannerToolContext = {
         adults: input.preferences?.partySize ?? trip.partySize,
@@ -270,7 +279,12 @@ export class JourneyService {
             })),
           };
 
-      const drafts = await this.enrichCheckpointImages(buildPlanNodeDrafts(skeleton, execution));
+      const drafts = await this.enrichCheckpointImages(
+        buildPlanNodeDrafts(skeleton, execution, {
+          originCity: skeleton.originCity,
+          returnCity: skeleton.originCity,
+        }),
+      );
       await this.replaceAiPlanNodes({
         tripId: input.tripId,
         rootId: root.id,

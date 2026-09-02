@@ -10,6 +10,7 @@ import { createImageModule } from "./modules/images/index.js";
 import { createJourneyModule } from "./modules/journey/index.js";
 import { createPlaceModule } from "./modules/places/index.js";
 import { createPlannerRoutes } from "./modules/planner/http.js";
+import { createProfileModule } from "./modules/profile/index.js";
 import { createLlmClient } from "./modules/planner/infra/create-llm.js";
 import { PlannerService } from "./modules/planner/service.js";
 import { PolicyService } from "./modules/policy/service.js";
@@ -41,6 +42,7 @@ export type AppContainer = {
     images: ReturnType<typeof createImageModule>["service"];
     checklist: ReturnType<typeof createChecklistModule>["service"];
     journey: ReturnType<typeof createJourneyModule>["service"];
+    profile: ReturnType<typeof createProfileModule>["service"];
     cost: CostService;
     policy: PolicyService;
     planner: PlannerService;
@@ -95,6 +97,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     policy,
     images: images.service,
   });
+  const profile = createProfileModule();
 
   const isDev = env.nodeEnv !== "production" && env.nodeEnv !== "test";
   const enableFileLogs = env.nodeEnv !== "test";
@@ -154,6 +157,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   await app.register(images.routes, { prefix: "/v1/images" });
   await app.register(checklist.routes, { prefix: "/v1/checklist" });
   await app.register(journey.routes, { prefix: "/v1/trips" });
+  await app.register(profile.routes, { prefix: "/v1/profile" });
   await app.register(createPlannerRoutes(planner), { prefix: "/v1/planner" });
 
   return {
@@ -174,6 +178,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
       images: images.service,
       checklist: checklist.service,
       journey: journey.service,
+      profile: profile.service,
       cost,
       policy,
       planner,

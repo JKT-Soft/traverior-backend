@@ -26,7 +26,9 @@ export class HeuristicLlmClient implements LlmClient {
 
     const originCity =
       pickPref(user, "originCity") ??
-      (/\bjakarta\b|cgk\b/i.test(user) ? "Jakarta" : undefined);
+      (/\bjakarta\b|cgk\b/i.test(user) ? "Jakarta" : undefined) ??
+      (/\bsurabaya\b|sub\b/i.test(user) ? "Surabaya" : undefined) ??
+      "Jakarta";
 
     const startDate = pickPref(user, "startDate") ?? "2026-10-01";
     const endDate = pickPref(user, "endDate") ?? "2026-10-10";
