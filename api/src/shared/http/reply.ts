@@ -9,6 +9,14 @@ export function fail(
   status: number,
   code: string,
   message: string,
+  details?: Record<string, unknown>,
 ) {
-  return reply.status(status).send({ ok: false, error: { code, message } });
+  return reply.status(status).send({
+    ok: false,
+    error: {
+      code,
+      message,
+      ...details,
+    },
+  });
 }

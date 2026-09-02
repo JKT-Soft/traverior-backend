@@ -39,8 +39,10 @@ export function mergePlanPreferences(input: {
 
   return {
     originCity: request.originCity?.trim() || storedOrigin || tripOrigin,
+    destination: request.destination?.trim() || undefined,
     startDate: request.startDate,
     endDate: request.endDate,
+    dateFlexibility: request.dateFlexibility,
     partySize: request.partySize,
     budgetTone: request.budgetTone ?? budgetStyleToTone(input.stored?.budgetStyle),
     pace: request.pace ?? input.stored?.pace,

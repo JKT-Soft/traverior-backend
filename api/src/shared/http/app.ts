@@ -112,7 +112,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.setErrorHandler((err: unknown, req, reply) => {
     if (err instanceof AppError) {
       logRequestError(app, req, err, err.status >= 500 ? "error" : "warn");
-      return fail(reply, err.status, err.code, err.message);
+      return fail(reply, err.status, err.code, err.message, err.details);
     }
 
     const maybe = err as { statusCode?: number; message?: string };

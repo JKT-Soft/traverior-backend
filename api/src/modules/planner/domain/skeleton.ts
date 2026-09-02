@@ -34,6 +34,21 @@ export const TripSkeletonSchema = z.object({
   checkpoints: z.array(SkeletonCheckpointSchema).min(1).max(12),
 });
 
+export const PlanPreferencesSchema = z
+  .object({
+    originCity: z.string().optional(),
+    destination: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    dateFlexibility: z.enum(["flexible", "exact"]).optional(),
+    partySize: z.number().int().positive().optional(),
+    budgetTone: z.enum(["budget", "mid", "luxury"]).optional(),
+    pace: z.enum(["relaxed", "moderate", "packed"]).optional(),
+    passportCountry: z.string().optional(),
+    travelWith: z.string().optional(),
+  })
+  .optional();
+
 export type CheckpointNeed = z.infer<typeof CheckpointNeedSchema>;
 export type SkeletonCheckpoint = z.infer<typeof SkeletonCheckpointSchema>;
 export type TripSkeleton = z.infer<typeof TripSkeletonSchema>;
@@ -42,11 +57,14 @@ export type PlanSkeletonInput = {
   prompt: string;
   preferences?: {
     originCity?: string;
+    destination?: string;
     startDate?: string;
     endDate?: string;
+    dateFlexibility?: "flexible" | "exact";
     partySize?: number;
     budgetTone?: "budget" | "mid" | "luxury";
     pace?: "relaxed" | "moderate" | "packed";
     passportCountry?: string;
+    travelWith?: string;
   };
 };

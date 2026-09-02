@@ -2,20 +2,8 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { ValidationError } from "../../shared/http/errors.js";
 import { ok } from "../../shared/http/reply.js";
-import { TripSkeletonSchema } from "./domain/skeleton.js";
+import { PlanPreferencesSchema, TripSkeletonSchema } from "./domain/skeleton.js";
 import type { PlannerService } from "./service.js";
-
-const preferencesSchema = z
-  .object({
-    originCity: z.string().optional(),
-    startDate: z.string().optional(),
-    endDate: z.string().optional(),
-    partySize: z.number().int().positive().optional(),
-    budgetTone: z.enum(["budget", "mid", "luxury"]).optional(),
-    pace: z.enum(["relaxed", "moderate", "packed"]).optional(),
-    passportCountry: z.string().optional(),
-  })
-  .optional();
 
 const toolContextSchema = z
   .object({
@@ -55,7 +43,7 @@ export function createPlannerRoutes(service: PlannerService): FastifyPluginAsync
       const parsed = z
         .object({
           prompt: z.string().min(1),
-          preferences: preferencesSchema,
+          preferences: PlanPreferencesSchema,
         })
         .safeParse(req.body);
       if (!parsed.success) throw new ValidationError("Invalid body");
@@ -80,7 +68,7 @@ export function createPlannerRoutes(service: PlannerService): FastifyPluginAsync
       const parsed = z
         .object({
           prompt: z.string().min(1),
-          preferences: preferencesSchema,
+          preferences: PlanPreferencesSchema,
           context: toolContextSchema,
         })
         .safeParse(req.body);

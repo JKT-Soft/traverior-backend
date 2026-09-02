@@ -105,6 +105,42 @@ describe("PlannerService", () => {
     assert.equal(skeleton.originCity, "Surabaya");
   });
 
+  it("extractPlanSlots parses natural-language Japan dates without MCP", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const result = await planner.extractPlanSlots({
+      prompt: "Saya mau liburan ke jepang 3 hari di hari pertama bulan kedua tahun ini",
+      preferences: { originCity: "Surabaya" },
+      today: new Date("2026-09-02T00:00:00Z"),
+    });
+    assert.equal(result.llm, "heuristic");
+    assert.ok(result.extracted.destination);
+    assert.equal(result.extracted.startDate, "2027-02-01");
+    assert.equal(result.extracted.endDate, "2027-02-03");
+    assert.equal(
+      result.missing.some((item) => item.severity === "required"),
+      false,
+    );
+  });
+
+  it("extractPlanSlots asks for destination and dates on a vague prompt", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const result = await planner.extractPlanSlots({
+      prompt: "Saya ingin liburan",
+      today: new Date("2026-09-02T00:00:00Z"),
+    });
+    assert.ok(result.missing.some((item) => item.field === "destination" && item.severity === "required"));
+    assert.ok(result.missing.some((item) => item.field === "startDate" && item.severity === "required"));
+  });
+
+  it("planSkeleton omits invented calendar dates", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const { skeleton } = await planner.planSkeleton({
+      prompt: "Saya ingin liburan ke Jepang",
+    });
+    assert.equal(skeleton.assumedStartDate, undefined);
+    assert.equal(skeleton.assumedEndDate, undefined);
+  });
+
   it("planSkeleton via heuristic llm", async () => {
     const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
     const { skeleton, llm } = await planner.planSkeleton({

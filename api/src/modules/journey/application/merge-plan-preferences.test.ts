@@ -27,6 +27,14 @@ describe("mergePlanPreferences", () => {
     assert.equal(empty.originCity, undefined);
   });
 
+  it("passes date flexibility and destination through", () => {
+    const merged = mergePlanPreferences({
+      request: { dateFlexibility: "flexible", destination: "Osaka" },
+    });
+    assert.equal(merged.dateFlexibility, "flexible");
+    assert.equal(merged.destination, "Osaka");
+  });
+
   it("maps budget style and prefers request pace", () => {
     const merged = mergePlanPreferences({
       stored: { budgetStyle: "balanced", pace: "relaxed" },

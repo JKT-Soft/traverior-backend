@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../../infra/prisma/client.js";
 import type { CacheStore } from "../../../shared/cache/index.js";
 import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
-import { NotFoundError, ValidationError } from "../../../shared/http/errors.js";
+import { NotFoundError, PlanNeedsInputError, ValidationError } from "../../../shared/http/errors.js";
 import type { CostService } from "../../cost/service.js";
 import type { ImageService } from "../../images/index.js";
 import type { PolicyService } from "../../policy/service.js";
@@ -12,6 +12,14 @@ import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromNodes, coverLocationFromTrip } from "./cover-image.js";
 import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-preferences.js";
 import { buildPlanNodeDrafts, parentPathOf, slugify, type PlannedNodeDraft } from "./persist-plan.js";
+import { resolvePlanDates } from "../../planner/domain/clarifications.js";
+import {
+  applyPlanAnswers,
+  ensureCriticalClarifications,
+  filterResolvedClarifications,
+  mergeExtractedPreferences,
+  splitClarifications,
+} from "../../planner/domain/extract-slots.js";
 
 export type CreateTripInput = {
   userId: string;
@@ -224,6 +232,7 @@ export class JourneyService {
     userId: string;
     prompt: string;
     preferences?: PlanSkeletonInput["preferences"];
+    answers?: Record<string, unknown>;
     context?: PlannerToolContext;
     executeTools?: boolean;
   }) {
@@ -235,6 +244,29 @@ export class JourneyService {
     const root = trip.nodes.find((n) => n.parentId === null);
     if (!root) throw new ValidationError("Trip root node missing");
 
+    const storedPreference = await this.readStoredPreference(input.userId);
+    const preferences = applyPlanAnswers(
+      mergePlanPreferences({
+        stored: storedPreference,
+        request: input.preferences,
+        tripOriginCity: trip.originCity,
+      }),
+      input.answers,
+    );
+    const slots = await this.planner.extractPlanSlots({
+      prompt: input.prompt,
+      preferences,
+    });
+    const mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
+    const missing = ensureCriticalClarifications(
+      filterResolvedClarifications(slots.missing, mergedPreferences),
+      mergedPreferences,
+    );
+    const { required, recommended } = splitClarifications(missing);
+    if (required.length > 0) {
+      throw new PlanNeedsInputError(required);
+    }
+
     await this.db.trip.update({
       where: { id: input.tripId },
       data: { status: "planning" },
@@ -242,34 +274,37 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
-      const storedPreference = await this.readStoredPreference(input.userId);
-      const preferences = mergePlanPreferences({
-        stored: storedPreference,
-        request: input.preferences,
-        tripOriginCity: trip.originCity,
-      });
       const { skeleton, llm } = await this.planner.planSkeleton(
         {
           prompt: input.prompt,
-          preferences,
+          preferences: mergedPreferences,
         },
         {
           tripOriginCity: trip.originCity,
-          preferences,
+          preferences: mergedPreferences,
         },
       );
 
+      const dates = resolvePlanDates({
+        prompt: input.prompt,
+        preferences: mergedPreferences,
+        context: input.context,
+        trip: {
+          startDate: trip.startDate,
+          endDate: trip.endDate,
+          originCity: trip.originCity,
+        },
+        assumedStartDate: skeleton.assumedStartDate,
+        assumedEndDate: skeleton.assumedEndDate,
+      });
+
       const context: PlannerToolContext = {
-        adults: preferences.partySize ?? trip.partySize,
-        passportCountry: preferences.passportCountry,
-        checkIn:
-          input.context?.checkIn ?? preferences.startDate ?? skeleton.assumedStartDate,
-        checkOut:
-          input.context?.checkOut ?? preferences.endDate ?? skeleton.assumedEndDate,
-        departureDate:
-          input.context?.departureDate ?? preferences.startDate ?? skeleton.assumedStartDate,
-        returnDate:
-          input.context?.returnDate ?? preferences.endDate ?? skeleton.assumedEndDate,
+        adults: mergedPreferences.partySize ?? trip.partySize,
+        passportCountry: mergedPreferences.passportCountry,
+        checkIn: dates.start,
+        checkOut: dates.end,
+        departureDate: dates.start,
+        returnDate: dates.end,
         ...input.context,
       };
 
@@ -308,10 +343,8 @@ export class JourneyService {
           title: skeleton.title || trip.title,
           originCity: skeleton.originCity ?? trip.originCity,
           destinationSummary: skeleton.destinationSummary ?? trip.destinationSummary,
-          startDate: skeleton.assumedStartDate
-            ? new Date(skeleton.assumedStartDate)
-            : trip.startDate,
-          endDate: skeleton.assumedEndDate ? new Date(skeleton.assumedEndDate) : trip.endDate,
+          startDate: dates.start ? new Date(dates.start) : dates.mode === "flexible" ? null : trip.startDate,
+          endDate: dates.end ? new Date(dates.end) : dates.mode === "flexible" ? null : trip.endDate,
           partySize: skeleton.partySize ?? trip.partySize,
           planningVersion: { increment: 1 },
           lastPlannedAt: new Date(),
@@ -327,6 +360,7 @@ export class JourneyService {
         mcp: execution.mcp,
         skeleton,
         execution,
+        clarifications: recommended,
       };
     } catch (err) {
       await this.db.trip.update({

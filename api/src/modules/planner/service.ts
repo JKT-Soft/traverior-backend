@@ -17,7 +17,8 @@ import type { EventService } from "../events/application/service.js";
 import type { VisaService } from "../visa/application/service.js";
 import type { ChecklistService } from "../checklist/application/service.js";
 import { buildToolPlan } from "./infra/need-tools.js";
-import { buildSkeletonUserPrompt, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
+import { buildSkeletonUserPrompt, buildSlotExtractUserPrompt, SLOT_EXTRACT_SYSTEM_PROMPT, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
+import { SlotExtractionSchema, type SlotExtraction } from "./domain/extract-slots.js";
 
 export type PlannerDeps = {
   llm: LlmClient;
@@ -59,6 +60,56 @@ export class PlannerService {
 
   callTool(tool: string, args: Record<string, unknown>): Promise<McpToolResult> {
     return this.deps.mcp.callTool(tool, args);
+  }
+
+  /**
+   * Fase 0 — natural language → extracted slots + missing clarifications (no MCP).
+   */
+  async extractPlanSlots(input: {
+    prompt: string;
+    preferences?: PlanSkeletonInput["preferences"];
+    today?: Date;
+  }): Promise<{ llm: string } & SlotExtraction> {
+    const prompt = input.prompt?.trim();
+    if (!prompt) throw new ValidationError("prompt is required");
+
+    const raw = await this.deps.llm.completeJson({
+      temperature: 0,
+      maxTokens: 700,
+      messages: [
+        { role: "system", content: SLOT_EXTRACT_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: buildSlotExtractUserPrompt({
+            prompt,
+            preferences: input.preferences,
+            today: input.today ?? new Date(),
+          }),
+        },
+      ],
+    });
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripCodeFence(raw));
+    } catch {
+      throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
+    }
+
+    const slots = SlotExtractionSchema.safeParse(parsed);
+    if (!slots.success) {
+      throw new AppError(
+        502,
+        `LLM slot extraction failed validation: ${slots.error.issues[0]?.message ?? "invalid"}`,
+        "LLM_INVALID_SLOTS",
+      );
+    }
+
+    return {
+      llm: this.deps.llm.name,
+      extracted: slots.data.extracted,
+      missing: slots.data.missing,
+    };
   }
 
   /**

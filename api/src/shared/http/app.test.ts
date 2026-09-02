@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ValidationError } from "./errors.js";
+import { PlanNeedsInputError, ValidationError } from "./errors.js";
 import { buildApp } from "./app.js";
 import { ok } from "./reply.js";
 
@@ -15,6 +15,18 @@ describe("buildApp", () => {
     });
     app.get("/boom", async () => {
       throw new ValidationError("nope");
+    });
+    app.get("/needs-input", async () => {
+      throw new PlanNeedsInputError([
+        {
+          id: "dates",
+          field: "startDate",
+          severity: "required",
+          question: "When do you want to go?",
+          input: "date_range",
+          options: ["flexible"],
+        },
+      ]);
     });
     app.get("/crash", async () => {
       throw new Error("unexpected");
@@ -45,6 +57,11 @@ describe("buildApp", () => {
     const boom = await app.inject({ method: "GET", url: "/boom" });
     assert.equal(boom.statusCode, 400);
     assert.equal(boom.json().error.code, "VALIDATION_ERROR");
+
+    const needs = await app.inject({ method: "GET", url: "/needs-input" });
+    assert.equal(needs.statusCode, 409);
+    assert.equal(needs.json().error.code, "PLAN_NEEDS_INPUT");
+    assert.equal(needs.json().error.clarifications[0].id, "dates");
 
     const crash = await app.inject({ method: "GET", url: "/crash" });
     assert.equal(crash.statusCode, 500);

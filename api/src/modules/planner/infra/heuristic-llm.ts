@@ -1,4 +1,6 @@
 import type { LlmClient, LlmJsonRequest } from "../domain/ports.js";
+import { SLOT_EXTRACT_PHASE, parseNaturalLanguageDates } from "../domain/extract-slots.js";
+import type { SlotExtraction } from "../domain/extract-slots.js";
 import type { SkeletonCheckpoint, TripSkeleton } from "../domain/skeleton.js";
 
 type DestinationPlan = {
@@ -133,7 +135,12 @@ export class HeuristicLlmClient implements LlmClient {
   readonly name = "heuristic";
 
   async completeJson(request: LlmJsonRequest): Promise<string> {
+    const system = request.messages.find((m) => m.role === "system")?.content ?? "";
     const user = [...request.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    if (system.includes(SLOT_EXTRACT_PHASE)) {
+      return JSON.stringify(heuristicSlotExtraction(user));
+    }
+
     const lower = user.toLowerCase();
 
     const partyMatch = user.match(/partySize["']?\s*:\s*(\d+)/i);
@@ -153,8 +160,8 @@ export class HeuristicLlmClient implements LlmClient {
       (/\b(?:dari|from)\s+jakarta\b|\bcgk\b/i.test(user) ? "Jakarta" : undefined) ??
       (/\b(?:dari|from)\s+surabaya\b|\bsub\b/i.test(user) ? "Surabaya" : undefined);
 
-    const startDate = pickPref(user, "startDate") ?? "2026-10-01";
-    const endDate = pickPref(user, "endDate") ?? "2026-10-10";
+    const startDate = pickPref(user, "startDate") ?? isoDateIn(user);
+    const endDate = pickPref(user, "endDate") ?? undefined;
     const destination = inferDestination(user);
 
     const skeleton: TripSkeleton = {
@@ -177,4 +184,93 @@ function pickPref(blob: string, key: string): string | undefined {
   const re = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`, "i");
   const m = blob.match(re);
   return m?.[1];
+}
+
+function isoDateIn(blob: string): string | undefined {
+  const match = blob.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  return match?.[1];
+}
+
+function heuristicSlotExtraction(user: string): SlotExtraction {
+  const body = user.replace(/Today:\s*\d{4}-\d{2}-\d{2}/gi, "");
+  const todayMatch = user.match(/Today:\s*(\d{4}-\d{2}-\d{2})/i);
+  const today = todayMatch?.[1] ? new Date(`${todayMatch[1]}T00:00:00Z`) : new Date();
+  const destinationPref = pickPref(user, "destination");
+  const originPref = pickPref(user, "originCity");
+  const startPref = pickPref(user, "startDate");
+  const endPref = pickPref(user, "endDate");
+  const flexibilityPref = pickPref(user, "dateFlexibility");
+  const inferred = inferDestination(body);
+  const destinationName =
+    destinationPref ??
+    (inferred.checkpoints[0]?.city && inferred.checkpoints[0].city !== "Destination"
+      ? inferred.destinationSummary
+      : undefined);
+  const naturalDates = parseNaturalLanguageDates(body, today);
+  const startDate = startPref ?? naturalDates.startDate ?? isoDateIn(body);
+  const endDate = endPref ?? naturalDates.endDate;
+  const dateFlexibility =
+    flexibilityPref === "flexible" || flexibilityPref === "exact"
+      ? flexibilityPref
+      : /\b(fleksibel|flexible|kapan saja|anytime)\b/i.test(body)
+        ? "flexible"
+        : undefined;
+  const originCity =
+    originPref ??
+    (/\b(?:dari|from)\s+jakarta\b|\bcgk\b/i.test(body) ? "Jakarta" : undefined) ??
+    (/\b(?:dari|from)\s+surabaya\b|\bsub\b/i.test(body) ? "Surabaya" : undefined);
+  const partyMatch = body.match(/(\d+)\s*(?:orang|people|persons|pax|travelers?)/i);
+  const partyPref = user.match(/partySize["']?\s*:\s*(\d+)/i);
+  const partySize = partyPref ? Number(partyPref[1]) : partyMatch ? Number(partyMatch[1]) : undefined;
+
+  const missing: SlotExtraction["missing"] = [];
+  if (!destinationName) {
+    missing.push({
+      id: "destination",
+      field: "destination",
+      severity: "required",
+      question: "Mau liburan ke mana?",
+      input: "text",
+    });
+  }
+  if (!startDate && dateFlexibility !== "flexible") {
+    missing.push({
+      id: "dates",
+      field: "startDate",
+      severity: "required",
+      question: "Kapan berangkat?",
+      input: "date_range",
+      options: ["flexible"],
+    });
+  }
+  if (!originCity) {
+    missing.push({
+      id: "originCity",
+      field: "originCity",
+      severity: "recommended",
+      question: "Berangkat dari kota mana?",
+      input: "text",
+    });
+  }
+  if (!partySize) {
+    missing.push({
+      id: "partySize",
+      field: "partySize",
+      severity: "recommended",
+      question: "Berapa orang yang pergi?",
+      input: "number",
+    });
+  }
+
+  return {
+    extracted: {
+      destination: destinationName ?? null,
+      originCity: originCity ?? null,
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      dateFlexibility: dateFlexibility ?? null,
+      partySize: partySize ?? null,
+    },
+    missing,
+  };
 }

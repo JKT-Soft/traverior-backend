@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
-import { NotFoundError, ValidationError } from "../../../shared/http/errors.js";
+import { NotFoundError, PlanNeedsInputError, ValidationError } from "../../../shared/http/errors.js";
 import { createMockFn, type MockFn } from "../../../test/helpers.js";
 import { JourneyService } from "./service.js";
 
@@ -317,6 +317,11 @@ describe("JourneyService", () => {
 
     const planner = {
       mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Osaka", dateFlexibility: "flexible" as const },
+        missing: [],
+      }),
       planSkeleton: async () => ({
         llm: "heuristic",
         skeleton: {
@@ -380,6 +385,7 @@ describe("JourneyService", () => {
       tripId: "trip-1",
       userId: "user-1",
       prompt: "Liburan ke Osaka",
+      preferences: { dateFlexibility: "flexible" },
     });
 
     assert.equal(result.llm, "heuristic");
@@ -388,5 +394,165 @@ describe("JourneyService", () => {
     assert.ok(created.some((n) => n.type === "BOOKING" && n.title === "Hotel A"));
     assert.equal(rolled, true);
     assert.equal(tripRow.status, "ready");
+    assert.equal(tripRow.startDate, null);
+    assert.equal(tripRow.endDate, null);
+  });
+
+  it("planTrip asks for dates instead of inventing them", async () => {
+    let planned = false;
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Draft",
+      status: "draft",
+      partySize: 1,
+      baseCurrency: "IDR",
+      originCity: "Surabaya",
+      destinationSummary: null,
+      startDate: null,
+      endDate: null,
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+    };
+    const db = {
+      user: {
+        upsert: async () => ({ id: "user-1" }),
+        findUnique: async () => ({ id: "user-1", preference: null }),
+      },
+      trip: {
+        findMany: async () => [],
+        findFirst: async () => tripRow,
+        create: async () => ({}),
+        update: async () => tripRow,
+      },
+      pipelineNode: { findMany: async () => [], create: async () => ({}), update: async () => ({}) },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+    const planner = {
+      mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Osaka" },
+        missing: [
+          {
+            id: "dates",
+            field: "startDate",
+            severity: "required" as const,
+            question: "Kapan berangkat?",
+            input: "date_range" as const,
+            options: ["flexible"],
+          },
+        ],
+      }),
+      planSkeleton: async () => {
+        planned = true;
+        return { llm: "heuristic", skeleton: { title: "X", checkpoints: [] } };
+      },
+      executeSkeletonNeeds: async () => ({ mcp: "inprocess", checkpoints: [] }),
+    };
+    const service = new JourneyService(db as never, { planner: planner as never });
+
+    await assert.rejects(
+      () =>
+        service.planTrip({
+          tripId: "trip-1",
+          userId: "user-1",
+          prompt: "Liburan ke Osaka",
+        }),
+      (err: unknown) => {
+        assert.equal(err instanceof PlanNeedsInputError, true);
+        const error = err as PlanNeedsInputError;
+        assert.equal(error.status, 409);
+        assert.equal(error.code, "PLAN_NEEDS_INPUT");
+        const clarifications = error.details?.clarifications as Array<{ id: string }>;
+        assert.equal(clarifications[0]?.id, "dates");
+        return true;
+      },
+    );
+    assert.equal(planned, false);
+    assert.equal(tripRow.status, "draft");
+  });
+
+  it("planTrip persists user dates on retry", async () => {
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Draft",
+      status: "draft",
+      partySize: 1,
+      baseCurrency: "IDR",
+      originCity: "Surabaya",
+      destinationSummary: null,
+      startDate: null as Date | string | null,
+      endDate: null as Date | string | null,
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+    };
+    const db = {
+      user: {
+        upsert: async () => ({ id: "user-1" }),
+        findUnique: async () => ({ id: "user-1", preference: null }),
+      },
+      trip: {
+        findMany: async () => [],
+        findFirst: async () => tripRow,
+        create: async () => ({}),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(tripRow, data);
+          return tripRow;
+        },
+      },
+      pipelineNode: {
+        findMany: async () => [
+          {
+            id: "root-1",
+            parentId: null,
+            type: "JOURNEY",
+            origin: "user",
+            isLocked: false,
+            isCustom: false,
+            suppressAiRestore: false,
+            deletedAt: null,
+          },
+        ],
+        create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "n-1", ...data }),
+        update: async () => ({}),
+      },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+    const planner = {
+      mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Osaka", startDate: "2026-11-02", endDate: "2026-11-06" },
+        missing: [],
+      }),
+      planSkeleton: async () => ({
+        llm: "heuristic",
+        skeleton: {
+          title: "Osaka",
+          originCity: "Surabaya",
+          destinationSummary: "Osaka",
+          assumedStartDate: "2026-10-01",
+          checkpoints: [
+            { city: "Osaka", countryCode: "JP", role: "STAY" as const, days: 3, needs: [] },
+          ],
+        },
+      }),
+      executeSkeletonNeeds: async () => ({ mcp: "inprocess", checkpoints: [] }),
+    };
+    const service = new JourneyService(db as never, {
+      planner: planner as never,
+      policy: { canAiMutate: () => true } as never,
+    });
+
+    await service.planTrip({
+      tripId: "trip-1",
+      userId: "user-1",
+      prompt: "Liburan ke Osaka",
+      preferences: { startDate: "2026-11-02", endDate: "2026-11-06" },
+      executeTools: false,
+    });
+
+    assert.equal((tripRow.startDate as Date).toISOString().slice(0, 10), "2026-11-02");
+    assert.equal((tripRow.endDate as Date).toISOString().slice(0, 10), "2026-11-06");
   });
 });
