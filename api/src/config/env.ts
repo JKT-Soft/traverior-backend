@@ -79,6 +79,12 @@ function defaultMcpServersDir(): string {
 
 function mcpMode(source: NodeJS.ProcessEnv): Env["mcp"]["mode"] {
   const raw = (source.MCP_MODE ?? "").toLowerCase();
+  const isProduction = (source.NODE_ENV ?? "development") === "production";
+  const allowStdioInProduction = source.MCP_ALLOW_STDIO_IN_PRODUCTION === "true";
+
+  if (raw === "stdio" && isProduction && !allowStdioInProduction) {
+    return "inprocess";
+  }
   if (raw === "stdio" || raw === "inprocess") return raw;
   return "inprocess";
 }

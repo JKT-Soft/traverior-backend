@@ -109,4 +109,20 @@ describe("loadEnv", () => {
     assert.equal(loadEnv(baseEnv({ MCP_MODE: "stdio" })).mcp.mode, "stdio");
     assert.equal(loadEnv(baseEnv({})).mcp.mode, "inprocess");
   });
+
+  it("uses inprocess mcp in production when stdio is requested", () => {
+    const env = loadEnv(baseEnv({ MCP_MODE: "stdio", NODE_ENV: "production" }));
+    assert.equal(env.mcp.mode, "inprocess");
+  });
+
+  it("allows stdio mcp in production when explicitly enabled", () => {
+    const env = loadEnv(
+      baseEnv({
+        MCP_MODE: "stdio",
+        NODE_ENV: "production",
+        MCP_ALLOW_STDIO_IN_PRODUCTION: "true",
+      }),
+    );
+    assert.equal(env.mcp.mode, "stdio");
+  });
 });

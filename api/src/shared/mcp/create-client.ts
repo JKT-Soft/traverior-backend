@@ -17,5 +17,13 @@ export function createMcpClient(env: Env, services: McpDomainServices): McpToolC
       runnerArgsPrefix: env.mcp.runnerArgsPrefix,
     });
   }
+
+  if ((process.env.MCP_MODE ?? "").toLowerCase() === "stdio") {
+    console.warn(
+      "[traverior-api:mcp] MCP_MODE=stdio ignored in production; using inprocess. " +
+        "Set MCP_ALLOW_STDIO_IN_PRODUCTION=true to spawn MCP child processes.",
+    );
+  }
+
   return new InProcessMcpClient(services);
 }

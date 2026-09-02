@@ -1,8 +1,9 @@
+import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import path from "node:path";
 import { AppError } from "../http/errors.js";
 import { parseMcpToolPayload } from "./parse-result.js";
+import { resolveMcpRunner } from "./resolve-runner.js";
 import { MCP_SERVER_SCRIPTS, serverForTool, TOOL_SERVER } from "./tool-registry.js";
 import type { McpServerId, McpToolClient, McpToolDescriptor, McpToolResult } from "./types.js";
 
@@ -27,9 +28,12 @@ export class StdioMcpPool implements McpToolClient {
   private readonly runnerArgsPrefix: string[];
 
   constructor(private readonly options: StdioMcpPoolOptions) {
-    this.runnerCommand =
-      options.runnerCommand ?? (process.platform === "win32" ? "npx.cmd" : "npx");
-    this.runnerArgsPrefix = options.runnerArgsPrefix ?? ["tsx"];
+    const runner = resolveMcpRunner({
+      runnerCommand: options.runnerCommand,
+      runnerArgsPrefix: options.runnerArgsPrefix,
+    });
+    this.runnerCommand = runner.command;
+    this.runnerArgsPrefix = runner.argsPrefix;
   }
 
   async listTools(): Promise<McpToolDescriptor[]> {
