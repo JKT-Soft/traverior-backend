@@ -38,6 +38,18 @@ describe("normalizeTripSkeleton", () => {
     );
   });
 
+  it("keeps prompt origin over saved preference", () => {
+    const normalized = normalizeTripSkeleton(
+      {
+        title: "Japan",
+        originCity: "Bandung",
+        checkpoints: [{ city: "Tokyo", role: "STAY", days: 4, needs: ["hotels"] }],
+      },
+      { preferences: { originCity: "Surabaya" } },
+    );
+    assert.equal(normalized.originCity, "Bandung");
+  });
+
   it("respects explicit preferences origin", () => {
     const normalized = normalizeTripSkeleton(
       {

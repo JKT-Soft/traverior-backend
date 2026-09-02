@@ -9,6 +9,8 @@ import type { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
 import type { PlanSkeletonInput } from "../../planner/domain/skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
+import { coverImageUrlFromNodes, coverLocationFromTrip } from "./cover-image.js";
+import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-preferences.js";
 import { buildPlanNodeDrafts, parentPathOf, slugify, type PlannedNodeDraft } from "./persist-plan.js";
 
 export type CreateTripInput = {
@@ -100,7 +102,7 @@ export class JourneyService {
   }
 
   async listTrips(userId: string) {
-    return getOrSet(
+    const trips = await getOrSet(
       {
         cache: this.cache,
         key: this.listKey(userId),
@@ -110,8 +112,15 @@ export class JourneyService {
         this.db.trip.findMany({
           where: { userId },
           orderBy: { updatedAt: "desc" },
+          include: {
+            nodes: {
+              where: { deletedAt: null, type: "CHECKPOINT" },
+              orderBy: { sortOrder: "asc" },
+            },
+          },
         }),
     );
+    return Promise.all(trips.map((trip) => this.withCoverImage(trip)));
   }
 
   async getTrip(tripId: string, userId: string) {
@@ -134,7 +143,7 @@ export class JourneyService {
         if (!trip) throw new NotFoundError("Trip not found");
         return trip;
       },
-    );
+    ).then((trip) => this.withCoverImage(trip));
   }
 
   async listChildren(tripId: string, userId: string, parentId: string | null) {
@@ -233,39 +242,34 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
+      const storedPreference = await this.readStoredPreference(input.userId);
+      const preferences = mergePlanPreferences({
+        stored: storedPreference,
+        request: input.preferences,
+        tripOriginCity: trip.originCity,
+      });
       const { skeleton, llm } = await this.planner.planSkeleton(
         {
           prompt: input.prompt,
-          preferences: {
-            ...input.preferences,
-            originCity: input.preferences?.originCity ?? trip.originCity ?? undefined,
-          },
+          preferences,
         },
         {
           tripOriginCity: trip.originCity,
-          preferences: input.preferences,
+          preferences,
         },
       );
 
       const context: PlannerToolContext = {
-        adults: input.preferences?.partySize ?? trip.partySize,
-        passportCountry: input.preferences?.passportCountry,
+        adults: preferences.partySize ?? trip.partySize,
+        passportCountry: preferences.passportCountry,
         checkIn:
-          input.context?.checkIn ??
-          input.preferences?.startDate ??
-          skeleton.assumedStartDate,
+          input.context?.checkIn ?? preferences.startDate ?? skeleton.assumedStartDate,
         checkOut:
-          input.context?.checkOut ??
-          input.preferences?.endDate ??
-          skeleton.assumedEndDate,
+          input.context?.checkOut ?? preferences.endDate ?? skeleton.assumedEndDate,
         departureDate:
-          input.context?.departureDate ??
-          input.preferences?.startDate ??
-          skeleton.assumedStartDate,
+          input.context?.departureDate ?? preferences.startDate ?? skeleton.assumedStartDate,
         returnDate:
-          input.context?.returnDate ??
-          input.preferences?.endDate ??
-          skeleton.assumedEndDate,
+          input.context?.returnDate ?? preferences.endDate ?? skeleton.assumedEndDate,
         ...input.context,
       };
 
@@ -453,8 +457,46 @@ export class JourneyService {
     }
   }
 
+  private async readStoredPreference(userId: string) {
+    const user = await this.db.user.findUnique({
+      where: { id: userId },
+      include: { preference: true },
+    });
+    const preference = user && "preference" in user ? user.preference : null;
+    if (!preference) return null;
+    return {
+      budgetStyle: preference.budgetStyle as StoredTravelPreference["budgetStyle"],
+      pace: preference.pace as StoredTravelPreference["pace"],
+      extra: preference.extra,
+    };
+  }
+
+  private async withCoverImage<T extends {
+    title: string;
+    destinationSummary?: string | null;
+    nodes?: Array<{
+      type?: string;
+      checkpointKind?: string | null;
+      title?: string;
+      content?: unknown;
+    }>;
+  }>(trip: T) {
+    const fromNodes = coverImageUrlFromNodes(trip.nodes);
+    if (fromNodes) return { ...trip, coverImageUrl: fromNodes };
+
+    const location = coverLocationFromTrip(trip);
+    if (!location || !this.images) return { ...trip, coverImageUrl: null };
+
+    try {
+      const url = await this.images.getLocationThumbnail(location);
+      return { ...trip, coverImageUrl: url };
+    } catch {
+      return { ...trip, coverImageUrl: null };
+    }
+  }
+
   private listKey(userId: string) {
-    return cacheKey("trips:list", { userId });
+    return cacheKey("trips:list", { userId, v: 2 });
   }
 
   private tripKey(tripId: string, userId: string) {

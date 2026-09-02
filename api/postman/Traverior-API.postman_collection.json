@@ -113,6 +113,84 @@
       ]
     },
     {
+      "name": "Profile",
+      "description": "User profile + travel preferences (PostgreSQL User + UserPreference).",
+      "item": [
+        {
+          "name": "GET /v1/profile/health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/profile/health"
+          }
+        },
+        {
+          "name": "GET /v1/profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/profile",
+            "description": "Get current user profile and travel preferences. Creates User row on first call if missing."
+          }
+        },
+        {
+          "name": "PATCH /v1/profile (basic)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Agus Traveler\",\n  \"locale\": \"id\",\n  \"homeCurrency\": \"IDR\"\n}"
+            },
+            "url": "{{baseUrl}}/v1/profile",
+            "description": "Update display name, locale, and base currency."
+          }
+        },
+        {
+          "name": "PATCH /v1/profile (preferences)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"preferences\": {\n    \"budgetStyle\": \"balanced\",\n    \"pace\": \"moderate\",\n    \"dietary\": [\"halal\"],\n    \"interests\": [\"culture\", \"food\"],\n    \"travelWith\": \"solo\",\n    \"avoid\": [\"crowds\"],\n    \"budgetMax\": 15000000,\n    \"extra\": {\n      \"passportCountry\": \"ID\"\n    }\n  }\n}"
+            },
+            "url": "{{baseUrl}}/v1/profile",
+            "description": "Upsert UserPreference. extra is free-form JSON (e.g. passportCountry)."
+          }
+        },
+        {
+          "name": "PATCH /v1/profile (full)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Agus T.\",\n  \"photoUrl\": \"https://example.com/avatar.jpg\",\n  \"locale\": \"id\",\n  \"homeCurrency\": \"IDR\",\n  \"preferences\": {\n    \"budgetStyle\": \"luxury\",\n    \"pace\": \"relaxed\",\n    \"dietary\": [\"halal\"],\n    \"interests\": [\"culture\", \"food\", \"nature\"],\n    \"travelWith\": \"couple\",\n    \"avoid\": [],\n    \"budgetMax\": 25000000,\n    \"extra\": {\n      \"passportCountry\": \"ID\",\n      \"travelStyle\": \"Culture & food\"\n    }\n  }\n}"
+            },
+            "url": "{{baseUrl}}/v1/profile",
+            "description": "Update user fields and preferences in one request."
+          }
+        }
+      ]
+    },
+    {
       "name": "Flights",
       "item": [
         {

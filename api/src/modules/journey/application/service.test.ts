@@ -5,7 +5,10 @@ import { createMockFn, type MockFn } from "../../../test/helpers.js";
 import { JourneyService } from "./service.js";
 
 function createPrismaMock(): {
-  user: { upsert: MockFn<(...args: never[]) => Promise<unknown>> };
+  user: {
+    upsert: MockFn<(...args: never[]) => Promise<unknown>>;
+    findUnique: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
   trip: {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
     findMany: MockFn<(...args: never[]) => Promise<unknown>>;
@@ -22,6 +25,7 @@ function createPrismaMock(): {
   return {
     user: {
       upsert: createMockFn(async () => ({ id: "user-1", firebaseUid: "fb" })),
+      findUnique: createMockFn(async () => null),
     },
     trip: {
       create: createMockFn(async () => ({})),
@@ -268,7 +272,17 @@ describe("JourneyService", () => {
     };
 
     const db = {
-      user: { upsert: async () => ({ id: "user-1" }) },
+      user: {
+        upsert: async () => ({ id: "user-1" }),
+        findUnique: async () => ({
+          id: "user-1",
+          preference: {
+            budgetStyle: "balanced",
+            pace: "moderate",
+            extra: { originCity: "Surabaya", passportCountry: "ID" },
+          },
+        }),
+      },
       trip: {
         findMany: async () => [],
         findFirst: async () => tripRow,

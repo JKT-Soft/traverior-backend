@@ -39,10 +39,11 @@ Request login ke Google **tidak boleh** membawa `Authorization: Bearer`. Collect
 1. `GET /health` — cek server + providers
 2. **Get Firebase ID token** — No Auth; simpan `authToken`
 3. `GET /v1/auth/me` — pastikan token Firebase valid
-4. Domain search (flights / hotels / places / …)
-5. **POST /v1/trips** — butuh Postgres; simpan `tripId` otomatis
-6. `GET /v1/trips/:tripId` → `POST .../nodes` → `GET .../nodes`
-7. `POST /v1/planner/enrich-city` — orkestrasi multi-provider
+4. **Profile** — `GET /v1/profile` → `PATCH /v1/profile`
+5. Domain search (flights / hotels / places / …)
+6. **POST /v1/trips** — butuh Postgres; simpan `tripId` otomatis
+7. `GET /v1/trips/:tripId` → `POST .../nodes` → `GET .../nodes`
+8. `POST /v1/planner/enrich-city` — orkestrasi multi-provider
 
 ## Prasyarat
 

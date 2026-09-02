@@ -93,6 +93,18 @@ describe("PlannerService", () => {
     assert.ok(out.checkpoints[0]!.results.some((r) => r.tool === "search_hotels" && r.ok));
   });
 
+  it("planSkeleton uses preference origin when prompt omits departure", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const { skeleton } = await planner.planSkeleton(
+      {
+        prompt: "Saya ingin liburan ke Jepang",
+        preferences: { originCity: "Surabaya" },
+      },
+      { preferences: { originCity: "Surabaya" } },
+    );
+    assert.equal(skeleton.originCity, "Surabaya");
+  });
+
   it("planSkeleton via heuristic llm", async () => {
     const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
     const { skeleton, llm } = await planner.planSkeleton({
@@ -103,6 +115,16 @@ describe("PlannerService", () => {
     assert.ok(skeleton.checkpoints.length >= 2);
     assert.equal(skeleton.checkpoints[0]?.city, "Tokyo");
     assert.ok(skeleton.checkpoints[0]?.needs.includes("flights"));
+  });
+
+  it("planSkeleton for singapore does not route to japan", async () => {
+    const planner = new PlannerService(domainDeps(new HeuristicLlmClient()) as never);
+    const { skeleton } = await planner.planSkeleton({
+      prompt: "liburan ke singapore",
+      preferences: { originCity: "Jakarta" },
+    });
+    assert.equal(skeleton.checkpoints[0]?.city, "Singapore");
+    assert.equal(skeleton.destinationSummary, "Singapore");
   });
 
   it("planSkeleton rejects empty prompt", async () => {

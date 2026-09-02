@@ -16,7 +16,7 @@ Return ONE JSON object only (no markdown). Shape:
   "checkpoints": [
     {
       "city": string,
-      "countryCode": "JP" | ISO-2 | optional,
+      "countryCode": "SG" | "JP" | ISO-2 | optional,
       "role": "STAY" | "TRANSIT" | "DAY_TRIP",
       "days": number,
       "needs": ["flights"|"hotels"|"places"|"routes"|"weather"|"events"|"visa"|"checklist"],
@@ -28,13 +28,17 @@ Return ONE JSON object only (no markdown). Shape:
 Rules:
 - Structure a realistic multi-city itinerary from the user prompt + preferences.
 - The checkpoints array must list destination stops only (cities where the traveler stays or does day trips). Do NOT put the home/departure city in checkpoints.
-- Always set originCity (home airport city). If the user does not mention where they depart from, assume "${DEFAULT_ORIGIN_CITY}, Indonesia".
+- originCity is the traveler's departure/home airport city, never a destination.
+- If the user names a departure city in the prompt, set originCity to that city (this overrides preferences).
+- If they do not name a departure city, set originCity from preferences.originCity when present.
+- If both are missing, OMIT originCity. Do not invent a city (including ${DEFAULT_ORIGIN_CITY}).
 - The app will add departure and return hub nodes automatically from originCity; focus checkpoints on destinations.
 - Do NOT invent prices, durations in minutes, distances, or live availability.
 - Prefer 2–5 checkpoints. First checkpoint that needs an inbound flight should include "flights".
 - Every STAY should usually include hotels + places; include weather/routes/events/visa/checklist when relevant.
 - If dates are missing, you may assume peak/shoulder season dates and set assumedStartDate/assumedEndDate.
-- Default happy path when Japan is implied: Tokyo / Kyoto / Osaka style routing is fine.
+- Follow the destination named in the user prompt. Do not substitute Japan or any other country.
+- If Japan is the destination, Tokyo / Kyoto / Osaka style routing is fine.
 - Respond in the same language as the user prompt for title/summary/notes; keep JSON keys in English.`;
 
 export function buildSkeletonUserPrompt(input: PlanSkeletonInput): string {

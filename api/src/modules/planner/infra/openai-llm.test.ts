@@ -104,8 +104,25 @@ describe("HeuristicLlmClient", () => {
         },
       ],
     });
-    const parsed = JSON.parse(raw) as { checkpoints: unknown[] };
+    const parsed = JSON.parse(raw) as { checkpoints: { city: string }[] };
     assert.ok(parsed.checkpoints.length >= 2);
+    assert.equal(parsed.checkpoints[0]?.city, "Tokyo");
+  });
+
+  it("builds singapore skeleton instead of japan", async () => {
+    const client = new HeuristicLlmClient();
+    const raw = await client.completeJson({
+      messages: [
+        { role: "system", content: "sys" },
+        {
+          role: "user",
+          content: 'liburan ke singapore\n{"originCity":"Jakarta","partySize": 2}',
+        },
+      ],
+    });
+    const parsed = JSON.parse(raw) as { checkpoints: { city: string }[]; destinationSummary: string };
+    assert.equal(parsed.checkpoints[0]?.city, "Singapore");
+    assert.equal(parsed.destinationSummary, "Singapore");
   });
 });
 
