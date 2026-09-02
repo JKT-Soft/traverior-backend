@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 
-const require = createRequire(path.join(process.cwd(), "package.json"));
+const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 
 export type McpRunnerConfig = {
   command: string;
@@ -31,7 +31,7 @@ export function resolveMcpRunner(options?: {
   }
 
   try {
-    const tsxCli = require.resolve("tsx/cli");
+    const tsxCli = nodeRequire.resolve("tsx/cli");
     return {
       command: process.execPath,
       argsPrefix: [tsxCli],
