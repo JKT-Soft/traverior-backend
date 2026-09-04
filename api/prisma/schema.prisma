@@ -96,9 +96,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  preference UserPreference?
-  trips      Trip[]
-  editLogs   PipelineEditLog[]
+  preference  UserPreference?
+  trips       Trip[]
+  editLogs    PipelineEditLog[]
+  savedPlaces SavedPlace[]
 }
 
 model UserPreference {
@@ -137,10 +138,11 @@ model Trip {
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 
-  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  nodes    PipelineNode[]
-  alerts   TripAlert[]
-  editLogs PipelineEditLog[]
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nodes       PipelineNode[]
+  alerts      TripAlert[]
+  editLogs    PipelineEditLog[]
+  savedPlaces SavedPlace[]
 
   @@index([userId, status])
   @@index([userId, updatedAt])
@@ -184,11 +186,12 @@ model PipelineNode {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  trip     Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  parent   PipelineNode?     @relation("NodeTree", fields: [parentId], references: [id])
-  children PipelineNode[]    @relation("NodeTree")
-  editLogs PipelineEditLog[]
-  alerts   TripAlert[]
+  trip        Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  parent      PipelineNode?     @relation("NodeTree", fields: [parentId], references: [id])
+  children    PipelineNode[]    @relation("NodeTree")
+  editLogs    PipelineEditLog[]
+  alerts      TripAlert[]
+  savedPlaces SavedPlace[]
 
   @@index([tripId, parentId, sortOrder])
   @@index([tripId, path])
@@ -252,4 +255,32 @@ model ExchangeRate {
   fetchedAt DateTime
 
   @@id([base, quote])
+}
+
+model SavedPlace {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  name        String
+  address     String?
+  city        String?
+  country     String?
+  lat         Float?
+  lng         Float?
+  source      String   @default("user")
+  provider    String?
+  providerRef String?
+  tripId      String?  @db.Uuid
+  nodeId      String?  @db.Uuid
+  notes       String?
+  extra       Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  node PipelineNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, provider, providerRef])
+  @@index([userId, createdAt])
+  @@index([userId, nodeId])
 }
