@@ -71,6 +71,23 @@ describe("merge and filter slots", () => {
     );
   });
 
+  it("drops extra-slot clarifications answered on retry", () => {
+    const missing = filterResolvedClarifications(
+      [
+        {
+          id: "dietary",
+          field: "dietary",
+          severity: "required",
+          question: "Any dietary needs?",
+          input: "text",
+        },
+      ],
+      {},
+      { dietary: "vegetarian" },
+    );
+    assert.deepEqual(missing, []);
+  });
+
   it("applies retry answers onto preferences", () => {
     const merged = applyPlanAnswers(
       { originCity: "Surabaya" },

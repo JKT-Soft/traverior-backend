@@ -5,11 +5,12 @@ import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
 import { NotFoundError, PlanNeedsInputError, ValidationError } from "../../../shared/http/errors.js";
 import type { CostService } from "../../cost/service.js";
 import type { ImageService } from "../../images/index.js";
-import type { PolicyService } from "../../policy/service.js";
+import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
 import type { PlanSkeletonInput } from "../../planner/domain/skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromNodes, coverLocationFromTrip } from "./cover-image.js";
+import { serializeTrip, serializeTripNode } from "./serialize-trip.js";
 import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-preferences.js";
 import { buildPlanNodeDrafts, parentPathOf, slugify, type PlannedNodeDraft } from "./persist-plan.js";
 import { resolvePlanDates } from "../../planner/domain/clarifications.js";
@@ -18,6 +19,7 @@ import {
   ensureCriticalClarifications,
   filterResolvedClarifications,
   mergeExtractedPreferences,
+  publicExtractedSlots,
   splitClarifications,
 } from "../../planner/domain/extract-slots.js";
 
@@ -47,7 +49,7 @@ export class JourneyService {
   private readonly ttlSeconds: number;
   private readonly planner?: PlannerService;
   private readonly cost?: CostService;
-  private readonly policy?: PolicyService;
+  private readonly policy: PolicyService;
   private readonly images?: ImageService;
 
   constructor(
@@ -58,7 +60,7 @@ export class JourneyService {
     this.ttlSeconds = options.ttlSeconds ?? 60;
     this.planner = options.planner;
     this.cost = options.cost;
-    this.policy = options.policy;
+    this.policy = options.policy ?? new PolicyService();
     this.images = options.images;
   }
 
@@ -106,7 +108,7 @@ export class JourneyService {
     });
 
     await this.invalidateUserTrips(input.userId, trip.id);
-    return trip;
+    return serializeTrip(trip);
   }
 
   async listTrips(userId: string) {
@@ -126,7 +128,7 @@ export class JourneyService {
               orderBy: { sortOrder: "asc" },
             },
           },
-        }),
+        }).then((rows) => rows.map(serializeTrip)),
     );
     return Promise.all(trips.map((trip) => this.withCoverImage(trip)));
   }
@@ -149,7 +151,7 @@ export class JourneyService {
           },
         });
         if (!trip) throw new NotFoundError("Trip not found");
-        return trip;
+        return serializeTrip(trip);
       },
     ).then((trip) => this.withCoverImage(trip));
   }
@@ -170,7 +172,7 @@ export class JourneyService {
             deletedAt: null,
           },
           orderBy: { sortOrder: "asc" },
-        }),
+        }).then((nodes) => nodes.map(serializeTripNode)),
     );
   }
 
@@ -221,7 +223,7 @@ export class JourneyService {
     });
 
     await this.invalidateUserTrips(input.userId, input.tripId, input.parentId);
-    return node;
+    return serializeTripNode(node);
   }
 
   /**
@@ -259,12 +261,14 @@ export class JourneyService {
     });
     const mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
     const missing = ensureCriticalClarifications(
-      filterResolvedClarifications(slots.missing, mergedPreferences),
+      filterResolvedClarifications(slots.missing, mergedPreferences, input.answers),
       mergedPreferences,
     );
     const { required, recommended } = splitClarifications(missing);
     if (required.length > 0) {
-      throw new PlanNeedsInputError(required);
+      throw new PlanNeedsInputError(required, {
+        extracted: publicExtractedSlots(mergedPreferences),
+      });
     }
 
     await this.db.trip.update({
@@ -322,6 +326,8 @@ export class JourneyService {
         buildPlanNodeDrafts(skeleton, execution, {
           originCity: skeleton.originCity,
           returnCity: skeleton.originCity,
+          startDate: dates.start,
+          endDate: dates.end,
         }),
       );
       await this.replaceAiPlanNodes({
@@ -422,12 +428,17 @@ export class JourneyService {
     drafts: PlannedNodeDraft[];
   }) {
     const existing = await this.db.pipelineNode.findMany({
-      where: { tripId: input.tripId, deletedAt: null },
+      where: {
+        tripId: input.tripId,
+        OR: [{ deletedAt: null }, { suppressAiRestore: true }],
+      },
       select: {
         id: true,
         parentId: true,
+        path: true,
         type: true,
         origin: true,
+        sortOrder: true,
         isLocked: true,
         isCustom: true,
         suppressAiRestore: true,
@@ -435,14 +446,9 @@ export class JourneyService {
       },
     });
 
+    const { replaceable, preserved } = this.policy.planReplacement(existing);
     const now = new Date();
-    for (const node of existing) {
-      if (node.type === "JOURNEY" || node.parentId === null) continue;
-      if (node.origin !== "ai") continue;
-      const canMutate = this.policy
-        ? this.policy.canAiMutate(node)
-        : !node.isLocked && !node.isCustom && !node.suppressAiRestore;
-      if (!canMutate) continue;
+    for (const node of replaceable) {
       await this.db.pipelineNode.update({
         where: { id: node.id },
         data: { deletedAt: now },
@@ -451,13 +457,25 @@ export class JourneyService {
 
     const pathToId = new Map<string, string>([[input.rootPath, input.rootId]]);
     const sortByParent = new Map<string, number>();
+    for (const node of existing) {
+      if (node.deletedAt || !node.path) continue;
+      if (replaceable.some((item) => item.id === node.id)) continue;
+      pathToId.set(node.path, node.id);
+      const parentPath = parentPathOf(node.path);
+      const next = (sortByParent.get(parentPath) ?? 0);
+      sortByParent.set(parentPath, Math.max(next, node.sortOrder + 1));
+    }
 
-    for (const draft of input.drafts) {
+    const drafts = this.policy.filterDrafts(input.drafts, preserved);
+
+    for (const draft of drafts) {
       const parentPath = parentPathOf(draft.path);
       const parentId = pathToId.get(parentPath);
       if (!parentId) {
         throw new ValidationError(`Missing parent path ${parentPath}`);
       }
+      if (pathToId.has(draft.path)) continue;
+
       const depth = draft.path.split("/").filter(Boolean).length - 1;
       const sortOrder = sortByParent.get(parentPath) ?? 0;
       sortByParent.set(parentPath, sortOrder + 1);
@@ -479,6 +497,8 @@ export class JourneyService {
           costCurrency: draft.costCurrency ?? input.baseCurrency,
           costIsEstimate: true,
           durationMinutes: draft.durationMinutes ?? 0,
+          scheduleStart: draft.scheduleStart,
+          scheduleEnd: draft.scheduleEnd,
           deepLinkUrl: draft.deepLinkUrl,
           provider: draft.provider,
           providerRef: draft.providerRef,

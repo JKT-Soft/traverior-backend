@@ -31,9 +31,15 @@ export class ValidationError extends AppError {
 export class PlanNeedsInputError extends AppError {
   constructor(
     clarifications: unknown[],
-    message = "A few details will make this plan bookable.",
+    options?: {
+      message?: string;
+      extracted?: Record<string, unknown>;
+    },
   ) {
-    super(409, message, "PLAN_NEEDS_INPUT", { clarifications });
+    super(409, options?.message ?? "A few details will make this plan bookable.", "PLAN_NEEDS_INPUT", {
+      clarifications,
+      ...(options?.extracted ? { extracted: options.extracted } : {}),
+    });
     this.name = "PlanNeedsInputError";
   }
 }

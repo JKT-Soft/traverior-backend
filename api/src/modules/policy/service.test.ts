@@ -1,34 +1,80 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PolicyService } from "./service.js";
+import { PolicyService, type PipelinePolicyNode } from "./service.js";
+
+const open: PipelinePolicyNode = {
+  id: "n1",
+  path: "trip/osaka",
+  type: "CHECKPOINT",
+  parentId: "root",
+  origin: "ai",
+  isLocked: false,
+  isCustom: false,
+  suppressAiRestore: false,
+  deletedAt: null,
+};
 
 describe("PolicyService", () => {
+  const policy = new PolicyService();
+
   it("evaluates mutate rules", () => {
-    const p = new PolicyService();
-    assert.equal(
-      p.canAiMutate({ isLocked: false, isCustom: false, suppressAiRestore: false, deletedAt: null }),
-      true,
+    assert.equal(policy.canAiMutate(open), true);
+    assert.equal(policy.canAiMutate({ ...open, isLocked: true }), false);
+    assert.equal(policy.canAiMutate({ ...open, isCustom: true }), false);
+    assert.equal(policy.canAiMutate({ ...open, suppressAiRestore: true }), false);
+    assert.equal(policy.canAiMutate({ ...open, deletedAt: new Date() }), false);
+    assert.equal(policy.canAiMutate({ ...open, origin: "user" }), false);
+    assert.equal(policy.canAiMutate({ ...open, parentId: null, type: "JOURNEY" }), false);
+  });
+
+  it("keeps ancestors of a locked child and skips colliding drafts", () => {
+    const root = {
+      ...open,
+      id: "root",
+      path: "trip",
+      type: "JOURNEY",
+      parentId: null,
+      origin: "user" as const,
+    };
+    const city = { ...open, id: "city", path: "trip/osaka", parentId: "root" };
+    const hotel = {
+      ...open,
+      id: "hotel",
+      path: "trip/osaka/search_hotels-1",
+      type: "BOOKING",
+      parentId: "city",
+      isLocked: true,
+    };
+    const extra = {
+      ...open,
+      id: "poi",
+      path: "trip/osaka/search_pois-1",
+      type: "MODULE",
+      parentId: "city",
+    };
+
+    const plan = policy.planReplacement([root, city, hotel, extra]);
+    assert.deepEqual(
+      plan.preserved.map((node) => node.id).sort(),
+      ["city", "hotel"],
     );
-    assert.equal(
-      p.canAiMutate({ isLocked: true, isCustom: false, suppressAiRestore: false, deletedAt: null }),
-      false,
+    assert.deepEqual(
+      plan.replaceable.map((node) => node.id),
+      ["poi"],
     );
-    assert.equal(
-      p.canAiMutate({ isLocked: false, isCustom: true, suppressAiRestore: false, deletedAt: null }),
-      false,
+
+    const drafts = policy.filterDrafts(
+      [
+        { path: "trip/osaka" },
+        { path: "trip/osaka/search_hotels-1" },
+        { path: "trip/osaka/search_pois-1" },
+        { path: "trip/kyoto" },
+      ],
+      plan.preserved,
     );
-    assert.equal(
-      p.canAiMutate({ isLocked: false, isCustom: false, suppressAiRestore: true, deletedAt: null }),
-      false,
-    );
-    assert.equal(
-      p.canAiMutate({
-        isLocked: false,
-        isCustom: false,
-        suppressAiRestore: false,
-        deletedAt: new Date(),
-      }),
-      false,
+    assert.deepEqual(
+      drafts.map((draft) => draft.path),
+      ["trip/kyoto"],
     );
   });
 });

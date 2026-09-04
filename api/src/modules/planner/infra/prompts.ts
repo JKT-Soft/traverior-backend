@@ -77,6 +77,7 @@ Rules:
 - The app will add departure and return hub nodes automatically from originCity; focus checkpoints on destinations.
 - Do NOT invent prices, durations in minutes, distances, or live availability.
 - Prefer 2–5 checkpoints. First checkpoint that needs an inbound flight should include "flights".
+- When the user gives a trip start and end, set each checkpoint's days so they are consecutive and the days sum to the inclusive trip length (e.g. 4 days across London then Barcelona then Paris → 2+1+1 or 2+2 depending on city count). Do not put every city on day 1.
 - Every STAY should usually include hotels + places; include weather/routes/events/visa/checklist when relevant.
 - If dates are missing, OMIT assumedStartDate/assumedEndDate. Do not invent calendar dates.
 - If the user names dates, a month, or a holiday window, set assumedStartDate/assumedEndDate from that.

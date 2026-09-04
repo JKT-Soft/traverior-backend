@@ -119,4 +119,35 @@ describe("persist-plan", () => {
     assert.equal(drafts[5]?.checkpointKind, "RETURN");
     assert.match(drafts[5]?.title ?? "", /Jakarta/i);
   });
+
+  it("assigns contiguous stay dates across destination checkpoints", () => {
+    const drafts = buildPlanNodeDrafts(
+      {
+        title: "Europe",
+        originCity: "Jakarta",
+        checkpoints: [
+          { city: "London", countryCode: "GB", role: "STAY", days: 2, needs: [] },
+          { city: "Barcelona", countryCode: "ES", role: "STAY", days: 2, needs: [] },
+          { city: "Paris", countryCode: "FR", role: "STAY", days: 2, needs: [] },
+        ],
+      },
+      { checkpoints: [] },
+      { originCity: "Jakarta", returnCity: "Jakarta", startDate: "2026-10-01", endDate: "2026-10-04" },
+    );
+
+    const stays = drafts.filter((draft) => draft.checkpointKind === "STAY");
+    assert.deepEqual(
+      stays.map((draft) => ({
+        title: draft.title,
+        start: draft.scheduleStart?.toISOString().slice(0, 10),
+        end: draft.scheduleEnd?.toISOString().slice(0, 10),
+        days: (draft.content as { days?: number } | undefined)?.days,
+      })),
+      [
+        { title: "London", start: "2026-10-01", end: "2026-10-02", days: 2 },
+        { title: "Barcelona", start: "2026-10-03", end: "2026-10-03", days: 1 },
+        { title: "Paris", start: "2026-10-04", end: "2026-10-04", days: 1 },
+      ],
+    );
+  });
 });

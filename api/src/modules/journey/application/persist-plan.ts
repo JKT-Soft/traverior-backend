@@ -1,5 +1,12 @@
 import type { CheckpointKind, NodeType, Prisma } from "@prisma/client";
 import type { CheckpointToolResults } from "../../planner/service.js";
+import {
+  addDaysIso,
+  allocateCheckpointWindows,
+  atUtcNoon,
+  hotelCheckOutIso,
+  type CheckpointScheduleWindow,
+} from "../../planner/domain/checkpoint-schedule.js";
 import { DEFAULT_ORIGIN_CITY } from "../../planner/domain/normalize-skeleton.js";
 import type { SkeletonCheckpoint, TripSkeleton } from "../../planner/domain/skeleton.js";
 import type { McpToolResult } from "../../../shared/mcp/index.js";
@@ -7,6 +14,8 @@ import type { McpToolResult } from "../../../shared/mcp/index.js";
 export type BuildPlanNodeDraftsOptions = {
   originCity?: string;
   returnCity?: string;
+  startDate?: string;
+  endDate?: string;
 };
 
 export type PlannedNodeDraft = {
@@ -21,6 +30,8 @@ export type PlannedNodeDraft = {
   costAmount?: number;
   costCurrency?: string;
   durationMinutes?: number;
+  scheduleStart?: Date;
+  scheduleEnd?: Date;
   deepLinkUrl?: string;
   provider?: string;
   providerRef?: string;
@@ -281,7 +292,9 @@ function hubCheckpointDraft(
   path: string,
   city: string,
   kind: "ORIGIN" | "RETURN",
+  scheduleIso?: string,
 ): PlannedNodeDraft {
+  const at = atUtcNoon(scheduleIso);
   return {
     path,
     type: "CHECKPOINT",
@@ -294,20 +307,65 @@ function hubCheckpointDraft(
       role: kind,
       hub: true,
     },
+    scheduleStart: at,
+    scheduleEnd: at,
     origin: "ai",
     isCustom: false,
   };
 }
 
-function legDraft(path: string, title: string, subtitle: string): PlannedNodeDraft {
+function legDraft(
+  path: string,
+  title: string,
+  subtitle: string,
+  scheduleIso?: string,
+): PlannedNodeDraft {
+  const at = atUtcNoon(scheduleIso);
   return {
     path,
     type: "LEG",
     title,
     subtitle,
     contentType: "leg",
+    scheduleStart: at,
+    scheduleEnd: at,
     origin: "ai",
     isCustom: false,
+  };
+}
+
+function withChildSchedule(
+  child: PlannedNodeDraft,
+  window: CheckpointScheduleWindow | null,
+  toolIndex: number,
+): PlannedNodeDraft {
+  if (!window) return child;
+  const checkOut = hotelCheckOutIso(window);
+  if (child.contentType === "hotel" || (child.type === "BOOKING" && child.contentType === "hotel")) {
+    const content =
+      child.content && typeof child.content === "object" && !Array.isArray(child.content)
+        ? { ...(child.content as Record<string, unknown>), checkIn: window.start, checkOut }
+        : child.content;
+    return {
+      ...child,
+      content: content as Prisma.InputJsonValue,
+      scheduleStart: atUtcNoon(window.start),
+      scheduleEnd: atUtcNoon(checkOut),
+    };
+  }
+  if (child.contentType === "flight") {
+    return {
+      ...child,
+      scheduleStart: atUtcNoon(window.start),
+      scheduleEnd: atUtcNoon(window.start),
+    };
+  }
+  const dayOffset = window.days <= 1 ? 0 : toolIndex % window.days;
+  const day = addDaysIso(window.start, dayOffset);
+  return {
+    ...child,
+    scheduleStart: atUtcNoon(day),
+    scheduleEnd: atUtcNoon(day),
   };
 }
 
@@ -322,10 +380,16 @@ export function buildPlanNodeDrafts(
   const originCity = options.originCity ?? skeleton.originCity ?? DEFAULT_ORIGIN_CITY;
   const returnCity = options.returnCity ?? originCity;
   const destinations = skeleton.checkpoints;
+  const windows = allocateCheckpointWindows(destinations, {
+    start: options.startDate,
+    end: options.endDate,
+  });
+  const firstWindow = windows.find((window) => window != null) ?? null;
+  const lastWindow = [...windows].reverse().find((window) => window != null) ?? null;
 
   if (originCity && destinations.length > 0) {
     const originSlug = uniqueSlug(`${originCity}-origin`, usedSlugs, "origin");
-    drafts.push(hubCheckpointDraft(`trip/${originSlug}`, originCity, "ORIGIN"));
+    drafts.push(hubCheckpointDraft(`trip/${originSlug}`, originCity, "ORIGIN", options.startDate));
 
     const firstDestination = destinations[0]!;
     if (!citiesEqual(firstDestination.city, originCity)) {
@@ -335,6 +399,7 @@ export function buildPlanNodeDrafts(
           `trip/${legSlug}`,
           `Flight to ${firstDestination.city}`,
           `From ${originCity}`,
+          firstWindow?.start ?? options.startDate,
         ),
       );
     }
@@ -345,23 +410,29 @@ export function buildPlanNodeDrafts(
     if (usedSlugs.has(slug)) slug = `${slug}-${index + 1}`;
     usedSlugs.add(slug);
     const checkpointPath = `trip/${slug}`;
+    const window = windows[index] ?? null;
+    const stayDays = window?.days ?? checkpoint.days;
 
     drafts.push({
       path: checkpointPath,
       type: "CHECKPOINT",
       checkpointKind: roleToCheckpointKind(checkpoint.role),
       title: checkpoint.city,
-      subtitle: checkpoint.notes ?? `${checkpoint.days} day(s)`,
+      subtitle: checkpoint.notes ?? `${stayDays} day(s)`,
       contentType: "checkpoint",
       content: {
         city: checkpoint.city,
         countryCode: checkpoint.countryCode,
         role: checkpoint.role,
-        days: checkpoint.days,
+        days: stayDays,
+        startDate: window?.start,
+        endDate: window?.end,
         needs: checkpoint.needs,
         notes: checkpoint.notes,
       },
-      durationMinutes: checkpoint.days * 24 * 60,
+      durationMinutes: stayDays * 24 * 60,
+      scheduleStart: atUtcNoon(window?.start),
+      scheduleEnd: atUtcNoon(window?.end),
       origin: "ai",
       isCustom: false,
     });
@@ -370,7 +441,7 @@ export function buildPlanNodeDrafts(
     const results = exec?.results ?? [];
     results.forEach((result, toolIndex) => {
       const child = toolToNodeDraft(checkpointPath, result, `${slugify(result.tool)}-${toolIndex + 1}`);
-      if (child) drafts.push(child);
+      if (child) drafts.push(withChildSchedule(child, window, toolIndex));
     });
   });
 
@@ -383,12 +454,20 @@ export function buildPlanNodeDrafts(
           `trip/${legSlug}`,
           `Return to ${returnCity}`,
           `From ${lastDestination.city}`,
+          lastWindow?.end ?? options.endDate,
         ),
       );
     }
 
     const returnSlug = uniqueSlug(`${returnCity}-return`, usedSlugs, "return");
-    drafts.push(hubCheckpointDraft(`trip/${returnSlug}`, returnCity, "RETURN"));
+    drafts.push(
+      hubCheckpointDraft(
+        `trip/${returnSlug}`,
+        returnCity,
+        "RETURN",
+        options.endDate ?? lastWindow?.end,
+      ),
+    );
   }
 
   return drafts;

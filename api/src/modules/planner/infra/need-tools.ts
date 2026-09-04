@@ -3,6 +3,10 @@ import type {
   SkeletonCheckpoint,
   TripSkeleton,
 } from "../domain/skeleton.js";
+import {
+  allocateCheckpointWindows,
+  hotelCheckOutIso,
+} from "../domain/checkpoint-schedule.js";
 import type { PlannerToolContext } from "../../../shared/mcp/types.js";
 
 export type ToolCallSpec = {
@@ -121,10 +125,26 @@ export function buildToolPlan(
   skeleton: TripSkeleton,
   ctx: PlannerToolContext,
 ): Array<{ checkpoint: SkeletonCheckpoint; calls: ToolCallSpec[] }> {
-  return skeleton.checkpoints.map((checkpoint) => {
+  const lastIndex = skeleton.checkpoints.length - 1;
+  const windows = allocateCheckpointWindows(skeleton.checkpoints, {
+    start: ctx.checkIn ?? ctx.departureDate,
+    end: ctx.checkOut ?? ctx.returnDate,
+  });
+
+  return skeleton.checkpoints.map((checkpoint, index) => {
+    const window = windows[index];
+    const localCtx: PlannerToolContext = window
+      ? {
+          ...ctx,
+          checkIn: window.start,
+          checkOut: hotelCheckOutIso(window),
+          departureDate: index === 0 ? (ctx.departureDate ?? window.start) : window.start,
+          returnDate: index === lastIndex ? (ctx.returnDate ?? ctx.checkOut) : undefined,
+        }
+      : ctx;
     const calls: ToolCallSpec[] = [];
     for (const need of checkpoint.needs) {
-      calls.push(...buildToolCallsForNeed(need, checkpoint, ctx));
+      calls.push(...buildToolCallsForNeed(need, checkpoint, localCtx));
     }
     return { checkpoint, calls };
   });

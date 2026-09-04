@@ -376,9 +376,6 @@ describe("JourneyService", () => {
     const service = new JourneyService(db as never, {
       planner: planner as never,
       cost: cost as never,
-      policy: {
-        canAiMutate: () => true,
-      } as never,
     });
 
     const result = await service.planTrip({
@@ -396,6 +393,149 @@ describe("JourneyService", () => {
     assert.equal(tripRow.status, "ready");
     assert.equal(tripRow.startDate, null);
     assert.equal(tripRow.endDate, null);
+  });
+
+  it("planTrip keeps locked nodes and still rolls up cost", async () => {
+    const created: string[] = [];
+    const deleted: string[] = [];
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Draft",
+      status: "draft",
+      partySize: 1,
+      baseCurrency: "IDR",
+      originCity: "Jakarta",
+      destinationSummary: "Osaka",
+      startDate: null,
+      endDate: null,
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+    };
+    const existing = [
+      {
+        id: "root-1",
+        parentId: null,
+        path: "trip",
+        type: "JOURNEY",
+        origin: "user",
+        sortOrder: 0,
+        isLocked: false,
+        isCustom: false,
+        suppressAiRestore: false,
+        deletedAt: null,
+      },
+      {
+        id: "city-1",
+        parentId: "root-1",
+        path: "trip/osaka",
+        type: "CHECKPOINT",
+        origin: "ai",
+        sortOrder: 0,
+        isLocked: false,
+        isCustom: false,
+        suppressAiRestore: false,
+        deletedAt: null,
+      },
+      {
+        id: "hotel-1",
+        parentId: "city-1",
+        path: "trip/osaka/search_hotels-1",
+        type: "BOOKING",
+        origin: "ai",
+        sortOrder: 0,
+        isLocked: true,
+        isCustom: false,
+        suppressAiRestore: false,
+        deletedAt: null,
+      },
+    ];
+    const db = {
+      user: {
+        upsert: async () => ({ id: "user-1" }),
+        findUnique: async () => ({ id: "user-1", preference: null }),
+      },
+      trip: {
+        findMany: async () => [],
+        findFirst: async () => tripRow,
+        create: async () => ({}),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(tripRow, data);
+          return tripRow;
+        },
+      },
+      pipelineNode: {
+        findMany: async () => existing,
+        create: async ({ data }: { data: { path: string } }) => {
+          created.push(data.path);
+          return { id: `n-${created.length}`, ...data };
+        },
+        update: async ({ where, data }: { where: { id: string }; data: { deletedAt?: Date } }) => {
+          if (data.deletedAt) deleted.push(where.id);
+          return {};
+        },
+      },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+    const planner = {
+      mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Osaka", dateFlexibility: "flexible" as const },
+        missing: [],
+      }),
+      planSkeleton: async () => ({
+        llm: "heuristic",
+        skeleton: {
+          title: "Japan Adventure",
+          originCity: "Jakarta",
+          checkpoints: [
+            { city: "Osaka", countryCode: "JP", role: "STAY" as const, days: 3, needs: ["hotels" as const] },
+          ],
+        },
+      }),
+      executeSkeletonNeeds: async () => ({
+        mcp: "inprocess",
+        checkpoints: [
+          {
+            checkpoint: { city: "Osaka", role: "STAY" as const, days: 3, needs: ["hotels" as const] },
+            results: [
+              {
+                ok: true,
+                tool: "search_hotels",
+                data: {
+                  provider: "mock",
+                  hotels: [{ hotelId: "h1", name: "Hotel A", price: { amount: 50, currency: "USD" } }],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    };
+    let rolled = false;
+    const service = new JourneyService(db as never, {
+      planner: planner as never,
+      cost: {
+        rollupTrip: async () => {
+          rolled = true;
+          return { totalCostAmount: 50, totalDurationMinutes: 0 };
+        },
+      } as never,
+    });
+
+    await service.planTrip({
+      tripId: "trip-1",
+      userId: "user-1",
+      prompt: "Liburan ke Osaka",
+      preferences: { dateFlexibility: "flexible" },
+    });
+
+    assert.equal(deleted.includes("hotel-1"), false);
+    assert.equal(deleted.includes("city-1"), false);
+    assert.equal(created.includes("trip/osaka"), false);
+    assert.equal(created.includes("trip/osaka/search_hotels-1"), false);
+    assert.equal(rolled, true);
+    assert.equal(tripRow.status, "ready");
   });
 
   it("planTrip asks for dates instead of inventing them", async () => {
@@ -465,6 +605,7 @@ describe("JourneyService", () => {
         assert.equal(error.code, "PLAN_NEEDS_INPUT");
         const clarifications = error.details?.clarifications as Array<{ id: string }>;
         assert.equal(clarifications[0]?.id, "dates");
+        assert.equal((error.details?.extracted as { destination?: string })?.destination, "Osaka");
         return true;
       },
     );
@@ -541,7 +682,6 @@ describe("JourneyService", () => {
     };
     const service = new JourneyService(db as never, {
       planner: planner as never,
-      policy: { canAiMutate: () => true } as never,
     });
 
     await service.planTrip({

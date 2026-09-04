@@ -103,12 +103,24 @@ export function applyPlanAnswers(
 
 const DATE_FIELDS = new Set(["startDate", "endDate", "dates", "dateFlexibility"]);
 
+function hasAnsweredValue(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return cleanString(value) != null;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  return true;
+}
+
 export function filterResolvedClarifications(
   missing: PlanClarification[],
   preferences: NonNullable<PlanSkeletonInput["preferences"]>,
+  answers?: Record<string, unknown>,
 ): PlanClarification[] {
   const datesResolved = Boolean(
-    preferences.dateFlexibility === "flexible" || preferences.startDate,
+    preferences.dateFlexibility === "flexible" ||
+      preferences.startDate ||
+      answers?.dateFlexibility === "flexible" ||
+      hasAnsweredValue(answers?.startDate),
   );
 
   return missing.filter((item) => {
@@ -117,9 +129,33 @@ export function filterResolvedClarifications(
     }
     const key = item.field as keyof NonNullable<PlanSkeletonInput["preferences"]>;
     const value = preferences[key];
-    if (value == null || value === "") return true;
-    return false;
+    if (hasAnsweredValue(value) || hasAnsweredValue(answers?.[item.field]) || hasAnsweredValue(answers?.[item.id])) {
+      return false;
+    }
+    return true;
   });
+}
+
+export function publicExtractedSlots(
+  preferences: NonNullable<PlanSkeletonInput["preferences"]>,
+): Record<string, unknown> {
+  const extracted: Record<string, unknown> = {};
+  const keys = [
+    "destination",
+    "originCity",
+    "startDate",
+    "endDate",
+    "dateFlexibility",
+    "partySize",
+    "budgetTone",
+    "pace",
+    "travelWith",
+  ] as const;
+  for (const key of keys) {
+    const value = preferences[key];
+    if (hasAnsweredValue(value)) extracted[key] = value;
+  }
+  return extracted;
 }
 
 export function ensureCriticalClarifications(
