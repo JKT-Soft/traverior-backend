@@ -18,8 +18,10 @@ import {
   applyPlanAnswers,
   ensureCriticalClarifications,
   filterResolvedClarifications,
+  hasConcreteTravelDates,
   mergeExtractedPreferences,
   publicExtractedSlots,
+  requiredTravelDateClarification,
   splitClarifications,
 } from "../../planner/domain/extract-slots.js";
 
@@ -301,6 +303,13 @@ export class JourneyService {
         assumedStartDate: skeleton.assumedStartDate,
         assumedEndDate: skeleton.assumedEndDate,
       });
+
+      // Prefer explicit user dates; do not invent a trip from skeleton assumptions alone.
+      if (!hasConcreteTravelDates(mergedPreferences, input.answers) || !dates.start) {
+        throw new PlanNeedsInputError([requiredTravelDateClarification()], {
+          extracted: publicExtractedSlots(mergedPreferences),
+        });
+      }
 
       const context: PlannerToolContext = {
         adults: mergedPreferences.partySize ?? trip.partySize,

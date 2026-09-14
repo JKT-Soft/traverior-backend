@@ -319,7 +319,7 @@ describe("JourneyService", () => {
       mcpName: "inprocess",
       extractPlanSlots: async () => ({
         llm: "heuristic",
-        extracted: { destination: "Osaka", dateFlexibility: "flexible" as const },
+        extracted: { destination: "Osaka", startDate: "2026-10-01", endDate: "2026-10-04" },
         missing: [],
       }),
       planSkeleton: async () => ({
@@ -382,7 +382,7 @@ describe("JourneyService", () => {
       tripId: "trip-1",
       userId: "user-1",
       prompt: "Liburan ke Osaka",
-      preferences: { dateFlexibility: "flexible" },
+      preferences: { startDate: "2026-10-01", endDate: "2026-10-04" },
     });
 
     assert.equal(result.llm, "heuristic");
@@ -391,8 +391,70 @@ describe("JourneyService", () => {
     assert.ok(created.some((n) => n.type === "BOOKING" && n.title === "Hotel A"));
     assert.equal(rolled, true);
     assert.equal(tripRow.status, "ready");
-    assert.equal(tripRow.startDate, null);
-    assert.equal(tripRow.endDate, null);
+    assert.ok(tripRow.startDate);
+    assert.ok(tripRow.endDate);
+  });
+
+  it("planTrip rejects flexible-only dates without a concrete startDate", async () => {
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Draft",
+      status: "draft",
+      partySize: 1,
+      baseCurrency: "IDR",
+      originCity: "Jakarta",
+      destinationSummary: null,
+      startDate: null as Date | string | null,
+      endDate: null as Date | string | null,
+      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+    };
+    const db = {
+      user: {
+        upsert: async () => ({ id: "user-1" }),
+        findUnique: async () => ({ id: "user-1", preference: null }),
+      },
+      trip: {
+        findMany: async () => [],
+        findFirst: async () => tripRow,
+        create: async () => ({}),
+        update: async () => tripRow,
+      },
+      pipelineNode: { findMany: async () => [], create: async () => ({}), update: async () => ({}) },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+    let planned = false;
+    const planner = {
+      mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Osaka", dateFlexibility: "flexible" as const },
+        missing: [],
+      }),
+      planSkeleton: async () => {
+        planned = true;
+        return { llm: "heuristic", skeleton: { title: "X", checkpoints: [] } };
+      },
+      executeSkeletonNeeds: async () => ({ mcp: "inprocess", checkpoints: [] }),
+    };
+    const service = new JourneyService(db as never, { planner: planner as never });
+
+    await assert.rejects(
+      () =>
+        service.planTrip({
+          tripId: "trip-1",
+          userId: "user-1",
+          prompt: "Liburan ke Osaka kapan saja",
+          preferences: { dateFlexibility: "flexible" },
+        }),
+      (err: unknown) => {
+        assert.equal(err instanceof PlanNeedsInputError, true);
+        const clarifications = (err as PlanNeedsInputError).details?.clarifications as Array<{ id: string }>;
+        assert.equal(clarifications[0]?.id, "dates");
+        return true;
+      },
+    );
+    assert.equal(planned, false);
   });
 
   it("planTrip keeps locked nodes and still rolls up cost", async () => {
@@ -480,7 +542,7 @@ describe("JourneyService", () => {
       mcpName: "inprocess",
       extractPlanSlots: async () => ({
         llm: "heuristic",
-        extracted: { destination: "Osaka", dateFlexibility: "flexible" as const },
+        extracted: { destination: "Osaka", startDate: "2026-10-01", endDate: "2026-10-04" },
         missing: [],
       }),
       planSkeleton: async () => ({
@@ -527,7 +589,7 @@ describe("JourneyService", () => {
       tripId: "trip-1",
       userId: "user-1",
       prompt: "Liburan ke Osaka",
-      preferences: { dateFlexibility: "flexible" },
+      preferences: { startDate: "2026-10-01", endDate: "2026-10-04" },
     });
 
     assert.equal(deleted.includes("hotel-1"), false);

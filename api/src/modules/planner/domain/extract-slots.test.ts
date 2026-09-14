@@ -63,11 +63,37 @@ describe("merge and filter slots", () => {
     );
   });
 
+  it("keeps date clarifications when only flexible is set", () => {
+    const missing = filterResolvedClarifications(
+      [
+        {
+          id: "dates",
+          field: "startDate",
+          severity: "required",
+          question: "When?",
+          input: "date_range",
+        },
+      ],
+      { dateFlexibility: "flexible" },
+      { dateFlexibility: "flexible" },
+    );
+    assert.equal(missing.length, 1);
+    assert.equal(missing[0]?.id, "dates");
+  });
+
   it("adds critical destination/date clarifications if the LLM omitted them", () => {
     const missing = ensureCriticalClarifications([], {});
     assert.deepEqual(
       missing.map((item) => item.id),
       ["destination", "dates"],
+    );
+    const flexibleOnly = ensureCriticalClarifications([], {
+      destination: "Osaka",
+      dateFlexibility: "flexible",
+    });
+    assert.deepEqual(
+      flexibleOnly.map((item) => item.id),
+      ["dates"],
     );
   });
 

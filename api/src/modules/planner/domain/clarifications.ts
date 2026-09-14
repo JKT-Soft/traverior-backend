@@ -53,23 +53,38 @@ export function resolvePlanDates(
   start?: string;
   end?: string;
 } {
+  const explicitStart =
+    toIsoDate(input.preferences?.startDate) ??
+    toIsoDate(input.context?.departureDate) ??
+    toIsoDate(input.context?.checkIn) ??
+    toIsoDate(input.trip?.startDate);
+  const explicitEnd =
+    toIsoDate(input.preferences?.endDate) ??
+    toIsoDate(input.context?.returnDate) ??
+    toIsoDate(input.context?.checkOut) ??
+    toIsoDate(input.trip?.endDate);
+
+  if (explicitStart) {
+    return {
+      mode: input.preferences?.dateFlexibility === "flexible" ? "flexible" : "exact",
+      start: explicitStart,
+      end: explicitEnd ?? explicitStart,
+    };
+  }
+
+  // Flexible without a concrete window stays undated — caller must ask the user.
   if (input.preferences?.dateFlexibility === "flexible") {
     return { mode: "flexible" };
   }
 
-  const start =
-    toIsoDate(input.preferences?.startDate) ??
-    toIsoDate(input.context?.departureDate) ??
-    toIsoDate(input.context?.checkIn) ??
-    toIsoDate(input.trip?.startDate) ??
-    toIsoDate(input.assumedStartDate);
-  const end =
-    toIsoDate(input.preferences?.endDate) ??
-    toIsoDate(input.context?.returnDate) ??
-    toIsoDate(input.context?.checkOut) ??
-    toIsoDate(input.trip?.endDate) ??
-    toIsoDate(input.assumedEndDate);
+  const assumedStart = toIsoDate(input.assumedStartDate);
+  if (assumedStart) {
+    return {
+      mode: "exact",
+      start: assumedStart,
+      end: toIsoDate(input.assumedEndDate) ?? assumedStart,
+    };
+  }
 
-  if (start) return { mode: "exact", start, end };
   return { mode: "unspecified" };
 }

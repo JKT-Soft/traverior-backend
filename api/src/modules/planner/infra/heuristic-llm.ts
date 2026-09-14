@@ -233,14 +233,13 @@ function heuristicSlotExtraction(user: string): SlotExtraction {
       input: "text",
     });
   }
-  if (!startDate && dateFlexibility !== "flexible") {
+  if (!startDate) {
     missing.push({
       id: "dates",
       field: "startDate",
       severity: "required",
-      question: "Kapan berangkat?",
+      question: "Kapan berangkat? Pilih tanggal mulai dan selesai.",
       input: "date_range",
-      options: ["flexible"],
     });
   }
   if (!originCity) {

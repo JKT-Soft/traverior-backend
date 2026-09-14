@@ -37,10 +37,11 @@ Rules:
 - Never invent a destination, city, or calendar date the user did not imply.
 - Copy already-known structured preferences; do not list those fields in missing.
 - missing[] is only what the client still needs to confirm. Use camelCase field names the client can send back in preferences (destination, startDate, endDate, dateFlexibility, originCity, partySize, budgetTone, pace, travelWith) or another short camelCase name for extra slots (dietary, visa, etc.).
-- severity required = cannot plan a coherent trip: unknown destination, or unknown travel time with no flexibility.
-- If you extracted startDate or dateFlexibility=flexible, do not mark dates as missing.
+- severity required = cannot plan a coherent trip: unknown destination, or missing concrete travel dates.
+- Travel dates ALWAYS need a concrete startDate (YYYY-MM-DD). dateFlexibility=flexible alone is NOT enough — still add a required dates clarification with input date_range until startDate is known.
+- If you extracted startDate, do not mark dates as missing. Prefer endDate too when duration is implied.
 - partySize, budget, pace, origin, travelWith: recommended when unknown. partySize is NOT required (default 1).
-- If the user says timing is flexible, set dateFlexibility=flexible.
+- If the user says timing is flexible, set dateFlexibility=flexible AND still ask for preferred start/end dates.
 - Questions in the same language as the user prompt. JSON keys in English.`;
 
 export const SKELETON_SYSTEM_PROMPT = `You are Traverior's AI travel planner (Fase 1 — skeleton only).

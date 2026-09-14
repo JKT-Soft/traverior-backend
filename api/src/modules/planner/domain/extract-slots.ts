@@ -111,17 +111,33 @@ function hasAnsweredValue(value: unknown): boolean {
   return true;
 }
 
+/** Concrete calendar dates are required so flights/hotels/budget can run. Flexible alone is not enough. */
+export function hasConcreteTravelDates(
+  preferences: NonNullable<PlanSkeletonInput["preferences"]>,
+  answers?: Record<string, unknown>,
+): boolean {
+  return Boolean(
+    cleanIso(preferences.startDate) ||
+      cleanIso(typeof answers?.startDate === "string" ? answers.startDate : undefined),
+  );
+}
+
+export function requiredTravelDateClarification(): PlanClarification {
+  return {
+    id: "dates",
+    field: "startDate",
+    severity: "required",
+    question: "When do you want to go? Pick a start and end date.",
+    input: "date_range",
+  };
+}
+
 export function filterResolvedClarifications(
   missing: PlanClarification[],
   preferences: NonNullable<PlanSkeletonInput["preferences"]>,
   answers?: Record<string, unknown>,
 ): PlanClarification[] {
-  const datesResolved = Boolean(
-    preferences.dateFlexibility === "flexible" ||
-      preferences.startDate ||
-      answers?.dateFlexibility === "flexible" ||
-      hasAnsweredValue(answers?.startDate),
-  );
+  const datesResolved = hasConcreteTravelDates(preferences, answers);
 
   return missing.filter((item) => {
     if (DATE_FIELDS.has(item.field) || DATE_FIELDS.has(item.id)) {
@@ -172,19 +188,11 @@ export function ensureCriticalClarifications(
       input: "text",
     });
   }
-  const datesResolved = Boolean(preferences.dateFlexibility === "flexible" || preferences.startDate);
   if (
-    !datesResolved &&
+    !hasConcreteTravelDates(preferences) &&
     !next.some((item) => DATE_FIELDS.has(item.field) || DATE_FIELDS.has(item.id))
   ) {
-    next.push({
-      id: "dates",
-      field: "startDate",
-      severity: "required",
-      question: "When do you want to go?",
-      input: "date_range",
-      options: ["flexible"],
-    });
+    next.push(requiredTravelDateClarification());
   }
   return next;
 }
