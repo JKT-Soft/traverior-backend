@@ -13,7 +13,9 @@ describe("FlightService", () => {
       departureDate: "2026-10-01",
       adults: 2,
     });
-    assert.equal(offers[0]?.carrier, "Mock Air");
+    assert.equal(offers[0]?.carrier, "Garuda Indonesia");
+    assert.equal(offers[0]?.transit, "direct");
+    assert.equal(offers[0]?.originAirport.code, "CGK");
     assert.ok(await service.getOffer("mock-CGK-KIX"));
     assert.equal(await service.getOffer("other"), null);
     assert.equal(service.providerName, "mock");

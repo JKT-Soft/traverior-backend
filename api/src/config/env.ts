@@ -21,6 +21,16 @@ export type Env = {
     };
   };
   firebaseProjectId?: string;
+  firebaseWebApiKey?: string;
+  authTestLogin: {
+    enabled: boolean;
+    email?: string;
+    password?: string;
+  };
+  swaggerBasicAuth?: {
+    username: string;
+    password: string;
+  };
   openaiApiKey?: string;
   llm: {
     /** openai when key present (unless forced); heuristic for offline/dev */
@@ -75,6 +85,13 @@ import path from "node:path";
 
 function defaultMcpServersDir(): string {
   return path.resolve(process.cwd(), "../mcp");
+}
+
+function swaggerBasicAuthFromEnv(source: NodeJS.ProcessEnv): Env["swaggerBasicAuth"] {
+  const username = source.SWAGGER_BASIC_USER?.trim();
+  const password = source.SWAGGER_BASIC_PASSWORD;
+  if (!username || !password) return undefined;
+  return { username, password };
 }
 
 function mcpMode(source: NodeJS.ProcessEnv): Env["mcp"]["mode"] {
@@ -132,6 +149,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       },
     },
     firebaseProjectId: source.FIREBASE_PROJECT_ID?.trim() || undefined,
+    firebaseWebApiKey: source.FIREBASE_WEB_API_KEY?.trim() || undefined,
+    authTestLogin: {
+      enabled:
+        (source.NODE_ENV ?? "development") !== "production" &&
+        boolEnv(source, "AUTH_TEST_LOGIN", true),
+      email: source.FIREBASE_TEST_EMAIL?.trim() || undefined,
+      password: source.FIREBASE_TEST_PASSWORD || undefined,
+    },
+    swaggerBasicAuth: swaggerBasicAuthFromEnv(source),
     openaiApiKey,
     llm: {
       provider: llmProvider,

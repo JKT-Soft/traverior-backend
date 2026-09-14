@@ -26,6 +26,7 @@ describe("createAuthModule", () => {
     const env = loadEnv(baseEnv());
     const mod = createAuthModule(env);
     assert.equal(mod.service.providerName, "dev");
+    assert.equal(mod.service.testLoginEnabled, true);
 
     const app = await buildTestApp(mod.routes, { user: { uid: "u", email: "e" } });
     const health = await injectJson(app, "GET", "/health");

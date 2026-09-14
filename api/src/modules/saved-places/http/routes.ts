@@ -2,6 +2,11 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { requireUser } from "../../auth/require-user.js";
 import { ValidationError } from "../../../shared/http/errors.js";
+import { healthDocs, routeDocs } from "../../../shared/http/openapi.js";
+import {
+  SAMPLE_OSAKA,
+  SAMPLE_PLACE_ID,
+} from "../../../shared/http/openapi-examples.js";
 import { ok } from "../../../shared/http/reply.js";
 import { SAVED_PLACE_SOURCES, type SavedPlaceService } from "../application/service.js";
 
@@ -61,55 +66,126 @@ const idParamsSchema = z.object({ id: uuid });
 
 export function createSavedPlaceRoutes(service: SavedPlaceService): FastifyPluginAsync {
   return async (app) => {
-    app.get("/health", async (_req, reply) => {
+    app.get("/health", { schema: healthDocs("Saved places", "saved-places") }, async (_req, reply) => {
       return ok(reply, { module: "saved-places" });
     });
 
-    app.get("/", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const parsed = listQuerySchema.safeParse(req.query);
-      if (!parsed.success) throw new ValidationError("Invalid query");
-      const places = await service.listPlaces(user.id, parsed.data);
-      return ok(reply, { places });
-    });
+    app.get(
+      "/",
+      {
+        schema: routeDocs({
+          tags: ["Saved places"],
+          summary: "List saved places",
+          description: "List bookmarked places, optionally filtered by city or node.",
+          querystring: listQuerySchema,
+          queryExample: { city: SAMPLE_OSAKA.city },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = listQuerySchema.safeParse(req.query);
+        if (!parsed.success) throw new ValidationError("Invalid query");
+        const places = await service.listPlaces(user.id, parsed.data);
+        return ok(reply, { places });
+      },
+    );
 
-    app.post("/", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const parsed = savePlaceSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError("Invalid body");
-      const result = await service.savePlace(user.id, parsed.data);
-      return ok(reply, result, result.created ? 201 : 200);
-    });
+    app.post(
+      "/",
+      {
+        schema: routeDocs({
+          tags: ["Saved places"],
+          summary: "Save a place",
+          description: "Bookmark a place. Returns 201 when created, 200 when already saved.",
+          body: savePlaceSchema,
+          bodyExample: {
+            name: "Osaka Castle",
+            address: "1-1 Osakajo, Chuo-ku",
+            city: SAMPLE_OSAKA.city,
+            country: "Japan",
+            lat: SAMPLE_OSAKA.lat,
+            lng: SAMPLE_OSAKA.lng,
+            source: "user",
+            notes: "Go early to avoid crowds",
+          },
+          statusCodes: [200, 201],
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = savePlaceSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const result = await service.savePlace(user.id, parsed.data);
+        return ok(reply, result, result.created ? 201 : 200);
+      },
+    );
 
-    app.get<{ Params: { id: string } }>("/:id", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const parsed = idParamsSchema.safeParse(req.params);
-      if (!parsed.success) throw new ValidationError("Invalid id");
-      const place = await service.getPlace(user.id, parsed.data.id);
-      return ok(reply, { place });
-    });
+    app.get<{ Params: { id: string } }>(
+      "/:id",
+      {
+        schema: routeDocs({
+          tags: ["Saved places"],
+          summary: "Get a saved place",
+          params: idParamsSchema,
+          paramsExample: { id: SAMPLE_PLACE_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = idParamsSchema.safeParse(req.params);
+        if (!parsed.success) throw new ValidationError("Invalid id");
+        const place = await service.getPlace(user.id, parsed.data.id);
+        return ok(reply, { place });
+      },
+    );
 
-    app.patch<{ Params: { id: string } }>("/:id", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const params = idParamsSchema.safeParse(req.params);
-      if (!params.success) throw new ValidationError("Invalid id");
-      const parsed = updatePlaceSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError("Invalid body");
-      const place = await service.updatePlace(user.id, params.data.id, parsed.data);
-      return ok(reply, { place });
-    });
+    app.patch<{ Params: { id: string } }>(
+      "/:id",
+      {
+        schema: routeDocs({
+          tags: ["Saved places"],
+          summary: "Update a saved place",
+          params: idParamsSchema,
+          paramsExample: { id: SAMPLE_PLACE_ID },
+          body: updatePlaceSchema,
+          bodyExample: {
+            notes: "Visit the park around the castle too",
+          },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = idParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid id");
+        const parsed = updatePlaceSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const place = await service.updatePlace(user.id, params.data.id, parsed.data);
+        return ok(reply, { place });
+      },
+    );
 
-    app.delete<{ Params: { id: string } }>("/:id", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const parsed = idParamsSchema.safeParse(req.params);
-      if (!parsed.success) throw new ValidationError("Invalid id");
-      const result = await service.deletePlace(user.id, parsed.data.id);
-      return ok(reply, result);
-    });
+    app.delete<{ Params: { id: string } }>(
+      "/:id",
+      {
+        schema: routeDocs({
+          tags: ["Saved places"],
+          summary: "Delete a saved place",
+          params: idParamsSchema,
+          paramsExample: { id: SAMPLE_PLACE_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = idParamsSchema.safeParse(req.params);
+        if (!parsed.success) throw new ValidationError("Invalid id");
+        const result = await service.deletePlace(user.id, parsed.data.id);
+        return ok(reply, result);
+      },
+    );
   };
 }

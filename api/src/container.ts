@@ -22,6 +22,7 @@ import { createCacheStore, type CacheStore } from "./shared/cache/index.js";
 import { createMcpClient, type McpToolClient } from "./shared/mcp/index.js";
 import { buildApp, type AuthResolver } from "./shared/http/app.js";
 import { pingExternalProviders } from "./shared/health/provider-ping.js";
+import { registerOpenApi, routeDocs } from "./shared/http/openapi.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
 
@@ -122,33 +123,46 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     await mcp.close?.();
   });
 
-  app.get("/health", async (_req, reply) => {
-    const providerPings = await pingExternalProviders(env);
-    return ok(reply, {
-      service: "traverior-api",
-      mark: providerPings.mark,
-      architecture: "modular-monolith",
-      framework: "fastify",
-      auth: env.authMode,
-      llm: {
-        provider: env.llm.provider,
-        model: env.llm.model,
-        client: llm.name,
-      },
-      mcp: {
-        mode: env.mcp.mode,
-        client: mcp.name,
-        serversDir: env.mcp.serversDir,
-      },
-      cache: {
-        enabled: env.cache.enabled,
-        store: cache.name,
-        ttl: env.cache.ttl,
-      },
-      providers: env.providers,
-      providerPings,
-    });
-  });
+  await registerOpenApi(app, { basicAuth: env.swaggerBasicAuth });
+
+  app.get(
+    "/health",
+    {
+      schema: routeDocs({
+        tags: ["Health"],
+        summary: "API health",
+        description: "Liveness plus short pings to the active external providers.",
+        auth: false,
+      }),
+    },
+    async (_req, reply) => {
+      const providerPings = await pingExternalProviders(env);
+      return ok(reply, {
+        service: "traverior-api",
+        mark: providerPings.mark,
+        architecture: "modular-monolith",
+        framework: "fastify",
+        auth: env.authMode,
+        llm: {
+          provider: env.llm.provider,
+          model: env.llm.model,
+          client: llm.name,
+        },
+        mcp: {
+          mode: env.mcp.mode,
+          client: mcp.name,
+          serversDir: env.mcp.serversDir,
+        },
+        cache: {
+          enabled: env.cache.enabled,
+          store: cache.name,
+          ttl: env.cache.ttl,
+        },
+        providers: env.providers,
+        providerPings,
+      });
+    },
+  );
   await app.register(auth.routes, { prefix: "/v1/auth" });
   await app.register(flights.routes, { prefix: "/v1/flights" });
   await app.register(hotels.routes, { prefix: "/v1/hotels" });

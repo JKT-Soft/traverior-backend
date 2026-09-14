@@ -30,4 +30,13 @@ export function createFlightModule(env: Env, cache?: CacheStore) {
 }
 
 export { FlightService } from "./application/service.js";
-export type { FlightProvider, FlightOffer, FlightSearchQuery } from "./domain/ports.js";
+export type {
+  FlightAirline,
+  FlightAirport,
+  FlightBaggageAllowance,
+  FlightOffer,
+  FlightProvider,
+  FlightSearchQuery,
+  FlightSegment,
+  FlightSlice,
+} from "./domain/ports.js";

@@ -9,6 +9,11 @@ async function main() {
   console.log(
     `[traverior-api] fastify modular monolith listening on :${env.port} (auth=${env.authMode})`,
   );
+  console.log(
+    `[traverior-api] swagger docs → http://localhost:${env.port}/docs${
+      env.swaggerBasicAuth ? " (basic auth)" : ""
+    }`,
+  );
   console.log(`[traverior-api] providers`, env.providers);
   console.log(`[traverior-api] logs → ${env.logDir}/app.log , ${env.logDir}/error.log`);
   console.log(

@@ -22,10 +22,17 @@ describe("flight routes", () => {
     assert.equal(badOrigin.statusCode, 400);
 
     const search = await injectJson(app, "POST", "/search", {
-      body: { origin: "CGK", destination: "KIX", departureDate: "2026-10-01" },
+      body: { origin: "CGK", destination: "KIX", departureDate: "2026-10-01", returnDate: "2026-10-08" },
     });
     assert.equal(search.statusCode, 200);
-    assert.ok(search.json().data.offers.length > 0);
+    const offer = search.json().data.offers[0];
+    assert.equal(offer.airline.name, "Garuda Indonesia");
+    assert.equal(offer.origin, "CGK");
+    assert.equal(offer.destination, "KIX");
+    assert.equal(offer.transit, "direct");
+    assert.equal(offer.cabinLabel, "Economy");
+    assert.equal(offer.slices.length, 2);
+    assert.ok(offer.baggage.length > 0);
 
     await app.close();
   });

@@ -13,6 +13,14 @@ describe("MockFlightProvider", () => {
       })
     )[0];
     assert.equal(offer?.cabin, "economy");
+    assert.equal(offer?.carrier, "Garuda Indonesia");
+    assert.equal(offer?.airline.iataCode, "GA");
+    assert.equal(offer?.originAirport.terminal, "3");
+    assert.equal(offer?.destinationAirport.name, "Kansai");
+    assert.equal(offer?.transit, "direct");
+    assert.equal(offer?.stops, 0);
+    assert.deepEqual(offer?.baggage, [{ type: "checked", quantity: 1 }]);
+    assert.equal(offer?.slices.length, 1);
     assert.equal(mock.name, "mock");
 
     class EmptyMock extends MockFlightProvider {

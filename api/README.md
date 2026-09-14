@@ -54,6 +54,13 @@ npm run dev
 
 Health: `GET http://localhost:3000/health` (liveness + ping singkat ke provider external yang aktif)
 
+Swagger UI: [http://localhost:3000/docs](http://localhost:3000/docs) — OpenAPI JSON at `/docs/json`. The page is gated by **HTTP Basic Auth**; the browser will prompt before the UI loads.
+
+- Username: `traverior`
+- Password: `TraveriorDocs2026`
+
+After that, call **Auth → Get a test Bearer token**; the returned `idToken` is set as Bearer automatically. Only `/health` and `POST /v1/auth/test-token` skip Firebase auth. `/docs` skips Firebase but still requires Basic Auth when those env vars are set.
+
 Auth (dev): header `Authorization: Bearer dev:demo-user`
 
 ## Logs
@@ -103,13 +110,28 @@ Without `REDIS_URL`, the API falls back to **in-memory** cache. Set `CACHE_ENABL
 Authorization: Bearer <firebase-id-token>
 ```
 
-Only `GET /health` is public (liveness). All `/v1/*` routes return `401` without a valid token.
+Only `GET /health` and `POST /v1/auth/test-token` (dev only) skip Firebase/dev Bearer auth. Swagger (`/docs`) is public to Bearer auth but requires HTTP Basic Auth when `SWAGGER_BASIC_USER` and `SWAGGER_BASIC_PASSWORD` are set. All other `/v1/*` routes return `401` without a valid token.
 
 ```env
 AUTH_MODE=firebase
 FIREBASE_PROJECT_ID=your-firebase-project-id
 # optional — service account JSON; verifyIdToken works with project ID
 GOOGLE_APPLICATION_CREDENTIALS=./secrets/firebase-admin.json
+# Web API key — POST /v1/auth/test-token (not available in production)
+FIREBASE_WEB_API_KEY=
+FIREBASE_TEST_EMAIL=
+FIREBASE_TEST_PASSWORD=
+SWAGGER_BASIC_USER=traverior
+SWAGGER_BASIC_PASSWORD=TraveriorDocs2026
+```
+
+In Swagger, run **Auth → Get a test Bearer token** — `idToken` is applied automatically as the Bearer token for later requests.
+
+```bash
+# get a Firebase ID token (no auth header)
+curl -X POST http://localhost:3000/v1/auth/test-token \
+  -H "content-type: application/json" \
+  -d '{"email":"you@example.com","password":"your-password"}'
 ```
 
 ## Example calls

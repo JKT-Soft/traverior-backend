@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { requireUser } from "../../auth/require-user.js";
 import { ValidationError } from "../../../shared/http/errors.js";
+import { healthDocs, routeDocs } from "../../../shared/http/openapi.js";
 import { ok } from "../../../shared/http/reply.js";
 import type { ProfileService } from "../application/service.js";
 
@@ -38,24 +39,60 @@ const updateProfileSchema = z
 
 export function createProfileRoutes(service: ProfileService): FastifyPluginAsync {
   return async (app) => {
-    app.get("/health", async (_req, reply) => {
+    app.get("/health", { schema: healthDocs("Profile", "profile") }, async (_req, reply) => {
       return ok(reply, { module: "profile" });
     });
 
-    app.get("/", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const profile = await service.getProfile(user.id);
-      return ok(reply, { profile });
-    });
+    app.get(
+      "/",
+      {
+        schema: routeDocs({
+          tags: ["Profile"],
+          summary: "Get profile",
+          description: "Load the authenticated user's profile and travel preferences.",
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const profile = await service.getProfile(user.id);
+        return ok(reply, { profile });
+      },
+    );
 
-    app.patch("/", async (req, reply) => {
-      const auth = requireUser(req.user);
-      const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-      const parsed = updateProfileSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError("Invalid body");
-      const profile = await service.updateProfile(user.id, parsed.data);
-      return ok(reply, { profile });
-    });
+    app.patch(
+      "/",
+      {
+        schema: routeDocs({
+          tags: ["Profile"],
+          summary: "Update profile",
+          description: "Patch display name, locale, currency, or preferences.",
+          body: updateProfileSchema,
+          bodyExample: {
+            displayName: "Agus Traveler",
+            photoUrl: "https://example.com/avatar.jpg",
+            locale: "id",
+            homeCurrency: "IDR",
+            preferences: {
+              budgetMax: 25000000,
+              budgetStyle: "balanced",
+              pace: "moderate",
+              dietary: ["halal"],
+              interests: ["food", "culture"],
+              travelWith: "couple",
+              avoid: ["extreme sports"],
+            },
+          },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = updateProfileSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const profile = await service.updateProfile(user.id, parsed.data);
+        return ok(reply, { profile });
+      },
+    );
   };
 }

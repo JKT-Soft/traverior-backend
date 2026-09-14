@@ -98,6 +98,11 @@ describe("DuffelFlightProvider", () => {
       cabinClass: "business",
     });
     assert.equal(offers[0]?.carrier, "NH");
+    assert.equal(offers[0]?.airline.iataCode, "NH");
+    assert.equal(offers[0]?.origin, "CGK");
+    assert.equal(offers[0]?.destination, "KIX");
+    assert.equal(offers[0]?.transit, "direct");
+    assert.equal(offers[0]?.stops, 0);
     assert.equal(offers[0]?.durationMinutes, 150);
     assert.equal(offers[1]?.carrier, "Unknown");
 

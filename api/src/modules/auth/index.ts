@@ -19,7 +19,12 @@ export function createAuthProvider(env: Env): AuthProvider {
 
 export function createAuthModule(env: Env) {
   const provider = createAuthProvider(env);
-  const service = new AuthService(provider);
+  const service = new AuthService(provider, {
+    enabled: env.authTestLogin.enabled,
+    webApiKey: env.firebaseWebApiKey,
+    email: env.authTestLogin.email,
+    password: env.authTestLogin.password,
+  });
   const resolveAuth: AuthResolver = (req) => service.resolve(req);
 
   return {

@@ -48,6 +48,8 @@ describe("loadEnv", () => {
     );
     assert.equal(env.authMode, "firebase");
     assert.equal(env.firebaseProjectId, "p1");
+    assert.equal(env.firebaseWebApiKey, undefined);
+    assert.equal(env.authTestLogin.enabled, true);
     assert.equal(env.secrets.duffelAccessToken, "d");
     assert.equal(env.providers.flights, "duffel");
   });
@@ -103,6 +105,48 @@ describe("loadEnv", () => {
 
     const noKey = loadEnv(baseEnv({ OPENAI_API_KEY: "" }));
     assert.equal(noKey.llm.provider, "heuristic");
+  });
+
+  it("parses firebase test-login settings", () => {
+    const enabled = loadEnv(
+      baseEnv({
+        FIREBASE_WEB_API_KEY: "web-key",
+        FIREBASE_TEST_EMAIL: "tester@example.com",
+        FIREBASE_TEST_PASSWORD: "secret",
+      }),
+    );
+    assert.equal(enabled.firebaseWebApiKey, "web-key");
+    assert.equal(enabled.authTestLogin.enabled, true);
+    assert.equal(enabled.authTestLogin.email, "tester@example.com");
+    assert.equal(enabled.authTestLogin.password, "secret");
+
+    const blank = loadEnv(baseEnv({ FIREBASE_WEB_API_KEY: "  ", FIREBASE_TEST_EMAIL: "  " }));
+    assert.equal(blank.firebaseWebApiKey, undefined);
+    assert.equal(blank.authTestLogin.email, undefined);
+
+    const disabled = loadEnv(baseEnv({ AUTH_TEST_LOGIN: "false" }));
+    assert.equal(disabled.authTestLogin.enabled, false);
+
+    const production = loadEnv(baseEnv({ NODE_ENV: "production", AUTH_TEST_LOGIN: "true" }));
+    assert.equal(production.authTestLogin.enabled, false);
+  });
+
+  it("parses swagger basic auth credentials", () => {
+    assert.equal(loadEnv(baseEnv()).swaggerBasicAuth, undefined);
+
+    const enabled = loadEnv(
+      baseEnv({
+        SWAGGER_BASIC_USER: " traverior ",
+        SWAGGER_BASIC_PASSWORD: "docs-secret",
+      }),
+    );
+    assert.deepEqual(enabled.swaggerBasicAuth, {
+      username: "traverior",
+      password: "docs-secret",
+    });
+
+    const incomplete = loadEnv(baseEnv({ SWAGGER_BASIC_USER: "traverior", SWAGGER_BASIC_PASSWORD: "" }));
+    assert.equal(incomplete.swaggerBasicAuth, undefined);
   });
 
   it("parses mcp mode", () => {
