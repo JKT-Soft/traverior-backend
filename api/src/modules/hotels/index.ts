@@ -24,3 +24,12 @@ export function createHotelModule(env: Env, cache?: CacheStore) {
   });
   return { service, routes: createHotelRoutes(service) };
 }
+
+export { HotelService } from "./application/service.js";
+export type {
+  HotelBoard,
+  HotelLocation,
+  HotelOffer,
+  HotelProvider,
+  HotelSearchQuery,
+} from "./domain/ports.js";

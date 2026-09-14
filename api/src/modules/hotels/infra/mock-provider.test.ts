@@ -13,5 +13,10 @@ describe("MockHotelProvider", () => {
     });
     assert.match(hotels[0]?.name ?? "", /Osaka/);
     assert.equal(hotels[0]?.price.isEstimate, true);
+    assert.equal(hotels[0]?.nights, 3);
+    assert.equal(hotels[0]?.board.name, "Breakfast");
+    assert.equal(hotels[0]?.refundable, true);
+    assert.equal(hotels[0]?.checkInTime, "15:00");
+    assert.equal(hotels[0]?.location.city, "Osaka");
   });
 });

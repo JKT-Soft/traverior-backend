@@ -45,12 +45,31 @@ describe("LiteApiHotelProvider", () => {
         ({
           ok: true,
           json: async () => ({
-            hotels: [{ id: "h1", name: "H", starRating: 4, address: "A" }],
+            hotels: [
+              {
+                id: "h1",
+                name: "H",
+                stars: 4,
+                address: "A",
+                city_name: "Osaka",
+                rating: 8.2,
+                checkinCheckoutTimes: { checkin_start: "3:00 PM", checkout: "11:00 AM" },
+              },
+            ],
             data: [
               {
                 hotelId: "h1",
                 roomTypes: [
-                  { rates: [{ retailRate: { total: [{ amount: 10, currency: "USD" }] } }] },
+                  {
+                    rates: [
+                      {
+                        boardType: "RO",
+                        boardName: "Room Only",
+                        retailRate: { total: [{ amount: 10, currency: "USD" }] },
+                        cancellationPolicies: { refundableTag: "NRFN" },
+                      },
+                    ],
+                  },
                 ],
               },
               { hotelId: "missing" },
@@ -65,6 +84,10 @@ describe("LiteApiHotelProvider", () => {
       checkOut: "2026-10-02",
     });
     assert.equal(hotels[0]?.price.amount, 10);
+    assert.equal(hotels[0]?.board.type, "RO");
+    assert.equal(hotels[0]?.refundable, false);
+    assert.equal(hotels[0]?.nights, 1);
+    assert.equal(hotels[0]?.checkInTime, "15:00");
     assert.equal(hotels[1]?.price.isEstimate, true);
 
     restoreFetch();

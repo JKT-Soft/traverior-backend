@@ -1,5 +1,6 @@
 import type { Env } from "../../../config/env.js";
 import type { HotelOffer, HotelProvider, HotelSearchQuery } from "../domain/ports.js";
+import { mapLiteApiHotel, type LiteApiRatesResponse } from "./map-liteapi-hotel.js";
 
 export class LiteApiHotelProvider implements HotelProvider {
   readonly name = "liteapi";
@@ -31,45 +32,11 @@ export class LiteApiHotelProvider implements HotelProvider {
       throw new Error(`LiteAPI search failed (${res.status}): ${await res.text()}`);
     }
 
-    const json = (await res.json()) as {
-      data?: Array<{
-        hotelId?: string;
-        roomTypes?: Array<{
-          rates?: Array<{
-            retailRate?: { total?: Array<{ amount: number; currency: string }> };
-          }>;
-        }>;
-      }>;
-      hotels?: Array<{
-        id: string;
-        name: string;
-        starRating?: number;
-        address?: string;
-      }>;
-    };
-
-    const hotelMeta = new Map((json.hotels ?? []).map((h) => [h.id, h]));
-    return (json.data ?? []).slice(0, 10).map((row) => {
-      const meta = hotelMeta.get(row.hotelId ?? "");
-      const rate = row.roomTypes?.[0]?.rates?.[0]?.retailRate?.total?.[0];
-      return {
-        contentType: "hotel" as const,
-        provider: this.name,
-        providerRef: row.hotelId,
-        fetchedAt: new Date().toISOString(),
-        name: meta?.name ?? row.hotelId ?? "Hotel",
-        checkIn: query.checkIn,
-        checkOut: query.checkOut,
-        stars: meta?.starRating,
-        address: meta?.address,
-        hotelId: row.hotelId ?? "unknown",
-        price: {
-          amount: rate?.amount ?? 0,
-          currency: rate?.currency ?? query.currency ?? "IDR",
-          isEstimate: !rate,
-        },
-      };
-    });
+    const json = (await res.json()) as LiteApiRatesResponse;
+    const hotelMeta = new Map((json.hotels ?? []).map((hotel) => [hotel.id ?? "", hotel]));
+    return (json.data ?? [])
+      .slice(0, 10)
+      .map((row) => mapLiteApiHotel(row, hotelMeta.get(row.hotelId ?? ""), query, this.name));
   }
 }
 

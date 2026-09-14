@@ -18,6 +18,12 @@ describe("hotel routes", () => {
       body: { cityName: "Osaka", checkIn: "2026-10-01", checkOut: "2026-10-04" },
     });
     assert.ok(res.json().data.hotels.length > 0);
+    const hotel = res.json().data.hotels[0];
+    assert.equal(hotel.name, "Osaka Central Hotel");
+    assert.equal(hotel.nights, 3);
+    assert.equal(hotel.board.type, "BB");
+    assert.equal(hotel.refundable, true);
+    assert.equal(hotel.checkInTime, "15:00");
 
     await app.close();
   });
