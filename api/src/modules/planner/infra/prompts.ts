@@ -77,13 +77,23 @@ Rules:
 - If both are missing, OMIT originCity. Do not invent a city (including ${DEFAULT_ORIGIN_CITY}).
 - The app will add departure and return hub nodes automatically from originCity; focus checkpoints on destinations.
 - Do NOT invent prices, durations in minutes, distances, or live availability.
-- Prefer 2–5 checkpoints. First checkpoint that needs an inbound flight should include "flights".
+- Prefer 2–5 checkpoints.
+- Flights — put "flights" on a checkpoint when the traveler needs a plane to ARRIVE there (and on the last stop, also to return home):
+  - Always include "flights" on the FIRST destination checkpoint (outbound from originCity / home).
+  - Always include "flights" on the LAST destination checkpoint (return home), even when origin/return hubs are added by the app.
+  - Single-city trip: one checkpoint still needs "flights" (covers outbound + return).
+  - Also include "flights" on a MIDDLE checkpoint when reaching it from the previous checkpoint is not realistic overland, including:
+    - Different countries (e.g. Singapore → Tokyo, Bangkok → Seoul).
+    - Island / archipelago hops where land travel is impossible or impractical — e.g. Indonesia (Jakarta↔Bali↔Labuan Bajo), Philippines (Manila↔Cebu↔Palawan), Japan across distant islands (Tokyo↔Okinawa, Tokyo↔Hokkaido when treated as a flight hop), Greece islands, Caribbean, Hawaii, New Zealand islands, etc.
+    - Any other long gap where rail/bus/ferry would be unrealistic for this itinerary's pace.
+  - Do NOT add "flights" between nearby land-linked cities where train/bus is the normal choice (e.g. Tokyo↔Kyoto↔Osaka, Bandung↔Jakarta by land, Europe rail corridors). Prefer "routes" there instead.
+  - At most one inbound flight need per arrival city; do not duplicate the same hop on two checkpoints.
 - When the user gives a trip start and end, set each checkpoint's days so they are consecutive and the days sum to the inclusive trip length (e.g. 4 days across London then Barcelona then Paris → 2+1+1 or 2+2 depending on city count). Do not put every city on day 1.
 - Every STAY should usually include hotels + places; include weather/routes/events/visa/checklist when relevant.
 - If dates are missing, OMIT assumedStartDate/assumedEndDate. Do not invent calendar dates.
 - If the user names dates, a month, or a holiday window, set assumedStartDate/assumedEndDate from that.
 - Follow the destination named in the user prompt. Do not substitute Japan or any other country.
-- If Japan is the destination, Tokyo / Kyoto / Osaka style routing is fine.
+- If Japan is the destination and stays are on the main island rail belt (Tokyo / Kyoto / Osaka), flights on first + last only is fine; add middle "flights" only for island hops (e.g. Okinawa, remote Hokkaido leg treated as flight).
 - Respond in the same language as the user prompt for title/summary/notes; keep JSON keys in English.`;
 
 export function buildSlotExtractUserPrompt(input: {

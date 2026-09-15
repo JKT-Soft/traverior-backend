@@ -133,15 +133,36 @@ export function buildToolPlan(
 
   return skeleton.checkpoints.map((checkpoint, index) => {
     const window = windows[index];
-    const localCtx: PlannerToolContext = window
-      ? {
-          ...ctx,
-          checkIn: window.start,
-          checkOut: hotelCheckOutIso(window),
-          departureDate: index === 0 ? (ctx.departureDate ?? window.start) : window.start,
-          returnDate: index === lastIndex ? (ctx.returnDate ?? ctx.checkOut) : undefined,
-        }
-      : ctx;
+    const isFirst = index === 0;
+    const isLast = index === lastIndex;
+    // Single-city: one round-trip search. Multi-city: outbound on first, return (swapped) on last.
+    const returnOnly = isLast && !isFirst;
+    const roundTrip = isFirst && isLast;
+    const tripReturn = ctx.returnDate ?? ctx.checkOut;
+
+    let localCtx: PlannerToolContext = ctx;
+    if (window) {
+      localCtx = {
+        ...ctx,
+        checkIn: window.start,
+        checkOut: hotelCheckOutIso(window),
+        departureDate: returnOnly
+          ? (tripReturn ?? window.start)
+          : isFirst
+            ? (ctx.departureDate ?? window.start)
+            : window.start,
+        returnDate: roundTrip ? tripReturn : undefined,
+      };
+
+      if (returnOnly && ctx.originIata && ctx.destinationIata) {
+        localCtx = {
+          ...localCtx,
+          originIata: ctx.destinationIata,
+          destinationIata: ctx.originIata,
+        };
+      }
+    }
+
     const calls: ToolCallSpec[] = [];
     for (const need of checkpoint.needs) {
       calls.push(...buildToolCallsForNeed(need, checkpoint, localCtx));

@@ -59,4 +59,69 @@ describe("need-tools", () => {
     assert.equal(plan[1]?.calls[0]?.arguments.checkIn, "2026-10-03");
     assert.equal(plan[1]?.calls[0]?.arguments.checkOut, "2026-10-05");
   });
+
+  it("searches outbound on first city and return (swapped) on last", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Japan",
+        checkpoints: [
+          { city: "Tokyo", countryCode: "JP", role: "STAY", days: 3, needs: ["flights"] },
+          { city: "Osaka", countryCode: "JP", role: "STAY", days: 2, needs: ["flights"] },
+        ],
+      },
+      {
+        originIata: "CGK",
+        destinationIata: "NRT",
+        checkIn: "2026-10-01",
+        checkOut: "2026-10-08",
+        departureDate: "2026-10-01",
+        returnDate: "2026-10-08",
+      },
+    );
+
+    const outbound = plan[0]?.calls.find((c) => c.tool === "search_flights");
+    const inbound = plan[1]?.calls.find((c) => c.tool === "search_flights");
+
+    assert.deepEqual(outbound?.arguments, {
+      origin: "CGK",
+      destination: "NRT",
+      departureDate: "2026-10-01",
+      returnDate: undefined,
+      adults: 1,
+    });
+    assert.deepEqual(inbound?.arguments, {
+      origin: "NRT",
+      destination: "CGK",
+      departureDate: "2026-10-08",
+      returnDate: undefined,
+      adults: 1,
+    });
+  });
+
+  it("uses round-trip search for a single-city trip", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Singapore",
+        checkpoints: [
+          { city: "Singapore", countryCode: "SG", role: "STAY", days: 4, needs: ["flights"] },
+        ],
+      },
+      {
+        originIata: "CGK",
+        destinationIata: "SIN",
+        checkIn: "2026-11-01",
+        checkOut: "2026-11-05",
+        departureDate: "2026-11-01",
+        returnDate: "2026-11-05",
+      },
+    );
+
+    assert.deepEqual(plan[0]?.calls[0]?.arguments, {
+      origin: "CGK",
+      destination: "SIN",
+      departureDate: "2026-11-01",
+      returnDate: "2026-11-05",
+      adults: 1,
+    });
+  });
 });

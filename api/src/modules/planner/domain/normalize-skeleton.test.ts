@@ -61,4 +61,36 @@ describe("normalizeTripSkeleton", () => {
 
     assert.equal(normalized.originCity, "Surabaya");
   });
+
+  it("adds flights on a middle stop when countryCode changes", () => {
+    const normalized = normalizeTripSkeleton({
+      title: "SEA",
+      originCity: "Jakarta",
+      checkpoints: [
+        { city: "Singapore", countryCode: "SG", role: "STAY", days: 2, needs: ["hotels"] },
+        { city: "Tokyo", countryCode: "JP", role: "STAY", days: 3, needs: ["hotels"] },
+        { city: "Seoul", countryCode: "KR", role: "STAY", days: 2, needs: ["hotels"] },
+      ],
+    });
+
+    assert.ok(normalized.checkpoints[0]!.needs.includes("flights"));
+    assert.ok(normalized.checkpoints[1]!.needs.includes("flights"));
+    assert.ok(normalized.checkpoints[2]!.needs.includes("flights"));
+  });
+
+  it("does not invent middle flights for same-country land belt", () => {
+    const normalized = normalizeTripSkeleton({
+      title: "Japan",
+      originCity: "Jakarta",
+      checkpoints: [
+        { city: "Tokyo", countryCode: "JP", role: "STAY", days: 3, needs: ["hotels"] },
+        { city: "Kyoto", countryCode: "JP", role: "STAY", days: 2, needs: ["hotels"] },
+        { city: "Osaka", countryCode: "JP", role: "STAY", days: 2, needs: ["hotels"] },
+      ],
+    });
+
+    assert.ok(normalized.checkpoints[0]!.needs.includes("flights"));
+    assert.equal(normalized.checkpoints[1]!.needs.includes("flights"), false);
+    assert.ok(normalized.checkpoints[2]!.needs.includes("flights"));
+  });
 });

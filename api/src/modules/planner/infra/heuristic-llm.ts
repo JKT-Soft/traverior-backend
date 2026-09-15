@@ -37,7 +37,7 @@ const JAPAN_PLAN: DestinationPlan = {
       role: "STAY",
       days: 2,
       needs: ["hotels", "places", "routes", "events", "weather", "flights"],
-      notes: "Food + departure hub",
+      notes: "Food + return flight home",
     },
   ],
 };

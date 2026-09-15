@@ -32,6 +32,9 @@ function ensureNeed(checkpoint: SkeletonCheckpoint, need: SkeletonCheckpoint["ne
 /**
  * Ensure skeleton has a resolved home hub and destination-only checkpoints.
  * Origin/return pipeline nodes are added later in persist-plan.
+ * Always attach flights on first (outbound) and last (return). Also ensure
+ * flights when consecutive destinations change countryCode (cross-border hop).
+ * Same-country island hops rely on the LLM skeleton needs (see prompt).
  */
 export function normalizeTripSkeleton(
   skeleton: TripSkeleton,
@@ -55,6 +58,16 @@ export function normalizeTripSkeleton(
     const first = checkpoints[0]!;
     if (!citiesEqual(first.city, originCity)) {
       checkpoints[0] = ensureNeed(first, "flights");
+    }
+
+    for (let i = 1; i < checkpoints.length; i++) {
+      const prev = checkpoints[i - 1]!;
+      const curr = checkpoints[i]!;
+      const prevCc = prev.countryCode?.trim().toUpperCase();
+      const currCc = curr.countryCode?.trim().toUpperCase();
+      if (prevCc && currCc && prevCc !== currCc) {
+        checkpoints[i] = ensureNeed(curr, "flights");
+      }
     }
 
     const lastIdx = checkpoints.length - 1;
