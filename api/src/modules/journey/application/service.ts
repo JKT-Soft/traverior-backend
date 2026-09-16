@@ -3,6 +3,14 @@ import { prisma as defaultPrisma } from "../../../infra/prisma/client.js";
 import type { CacheStore } from "../../../shared/cache/index.js";
 import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
 import { NotFoundError, PlanNeedsInputError, ValidationError } from "../../../shared/http/errors.js";
+import {
+  ApplicationLogService,
+  type ApplicationLogDb,
+} from "../../../shared/logging/application-log.js";
+import {
+  APPLICATION_LOG_STATUS,
+  APPLICATION_LOG_TYPE,
+} from "../../../shared/logging/application-log-types.js";
 import type { CostService } from "../../cost/service.js";
 import type { ImageService } from "../../images/index.js";
 import { PolicyService } from "../../policy/service.js";
@@ -42,9 +50,11 @@ export type JourneyServiceOptions = {
   cost?: CostService;
   policy?: PolicyService;
   images?: ImageService;
+  logs?: ApplicationLogService;
 };
 
-type JourneyDb = Pick<PrismaClient, "user" | "trip" | "pipelineNode" | "$transaction">;
+type JourneyDb = Pick<PrismaClient, "user" | "trip" | "pipelineNode" | "$transaction"> &
+  ApplicationLogDb;
 
 export class JourneyService {
   private readonly cache?: CacheStore;
@@ -53,6 +63,7 @@ export class JourneyService {
   private readonly cost?: CostService;
   private readonly policy: PolicyService;
   private readonly images?: ImageService;
+  private readonly logs: ApplicationLogService;
 
   constructor(
     private readonly db: JourneyDb = defaultPrisma,
@@ -64,6 +75,7 @@ export class JourneyService {
     this.cost = options.cost;
     this.policy = options.policy ?? new PolicyService();
     this.images = options.images;
+    this.logs = options.logs ?? new ApplicationLogService(this.db);
   }
 
   async ensureUser(firebaseUid: string, email: string) {
@@ -278,6 +290,26 @@ export class JourneyService {
       data: { status: "planning" },
     });
 
+    const initialLogPayload = {
+      prompt: input.prompt,
+      request: {
+        preferences: mergedPreferences,
+        answers: input.answers,
+        context: input.context,
+        executeTools: input.executeTools !== false,
+      },
+      slotExtraction: slots,
+    };
+    const planLog = await this.logs.start({
+      type: APPLICATION_LOG_TYPE.PLAN_PROCESS,
+      source: "journey.planTrip",
+      status: APPLICATION_LOG_STATUS.IN_PROGRESS,
+      message: "Trip planning started",
+      tripId: input.tripId,
+      userId: input.userId,
+      payload: initialLogPayload,
+    });
+
     try {
       const executeTools = input.executeTools !== false;
       const { skeleton, llm } = await this.planner.planSkeleton(
@@ -290,6 +322,14 @@ export class JourneyService {
           preferences: mergedPreferences,
         },
       );
+      await planLog?.progress({
+        message: "LLM skeleton generated",
+        payload: {
+          ...initialLogPayload,
+          skeleton,
+          providers: { llm },
+        },
+      });
 
       const dates = resolvePlanDates({
         prompt: input.prompt,
@@ -369,7 +409,7 @@ export class JourneyService {
       await this.invalidateUserTrips(input.userId, input.tripId);
       const updated = await this.getTrip(input.tripId, input.userId);
 
-      return {
+      const result = {
         trip: updated,
         llm,
         mcp: execution.mcp,
@@ -377,7 +417,21 @@ export class JourneyService {
         execution,
         clarifications: recommended,
       };
+
+      await planLog?.complete({
+        message: "Trip planning completed",
+        payload: {
+          ...initialLogPayload,
+          skeleton,
+          execution,
+          providers: { llm, mcp: execution.mcp },
+        },
+        result,
+      });
+
+      return result;
     } catch (err) {
+      await planLog?.fail(err, "Trip planning failed");
       await this.db.trip.update({
         where: { id: input.tripId },
         data: { status: trip.status },

@@ -20,6 +20,10 @@ function createPrismaMock(): {
     findMany: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
   };
+  applicationLog: {
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
   $transaction: MockFn<(fn: (tx: unknown) => unknown) => Promise<unknown>>;
 } {
   return {
@@ -36,6 +40,10 @@ function createPrismaMock(): {
     pipelineNode: {
       create: createMockFn(async () => ({})),
       findMany: createMockFn(async () => []),
+      update: createMockFn(async () => ({})),
+    },
+    applicationLog: {
+      create: createMockFn(async () => ({ id: "plan-log-1" })),
       update: createMockFn(async () => ({})),
     },
     $transaction: createMockFn(async (fn: (tx: unknown) => unknown) => fn({})),
@@ -257,6 +265,7 @@ describe("JourneyService", () => {
 
   it("planTrip persists AI nodes and rolls up cost", async () => {
     const created: Array<{ type: string; title: string; path: string }> = [];
+    const planLogUpdates: Array<Record<string, unknown>> = [];
     const tripRow = {
       id: "trip-1",
       userId: "user-1",
@@ -311,6 +320,13 @@ describe("JourneyService", () => {
           return row;
         },
         update: async () => ({}),
+      },
+      applicationLog: {
+        create: async () => ({ id: "plan-log-1" }),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          planLogUpdates.push(data);
+          return {};
+        },
       },
       $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
     };
@@ -393,6 +409,14 @@ describe("JourneyService", () => {
     assert.equal(tripRow.status, "ready");
     assert.ok(tripRow.startDate);
     assert.ok(tripRow.endDate);
+    assert.ok(
+      planLogUpdates.some(
+        (data) =>
+          data.message === "LLM skeleton generated" &&
+          typeof data.payload === "object",
+      ),
+    );
+    assert.ok(planLogUpdates.some((data) => data.status === "completed" && data.result));
   });
 
   it("planTrip rejects flexible-only dates without a concrete startDate", async () => {

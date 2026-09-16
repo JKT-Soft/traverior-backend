@@ -99,6 +99,7 @@ model User {
   preference  UserPreference?
   trips       Trip[]
   editLogs    PipelineEditLog[]
+  logs        ApplicationLog[]
   savedPlaces SavedPlace[]
 }
 
@@ -142,6 +143,7 @@ model Trip {
   nodes       PipelineNode[]
   alerts      TripAlert[]
   editLogs    PipelineEditLog[]
+  logs        ApplicationLog[]
   savedPlaces SavedPlace[]
 
   @@index([userId, status])
@@ -215,6 +217,32 @@ model PipelineEditLog {
 
   @@index([tripId, createdAt])
   @@index([nodeId, createdAt])
+}
+
+model ApplicationLog {
+  id          String    @id @default(uuid()) @db.Uuid
+  type        String
+  level       String    @default("info")
+  source      String?
+  status      String?
+  message     String?
+  userId      String?   @db.Uuid
+  tripId      String?   @db.Uuid
+  payload     Json?
+  result      Json?
+  error       Json?
+  durationMs  Int?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  trip Trip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([type, startedAt])
+  @@index([level, startedAt])
+  @@index([status, startedAt])
+  @@index([tripId, startedAt])
+  @@index([userId, startedAt])
 }
 
 model TripAlert {
