@@ -6,5 +6,7 @@ services:
     container_name: traverior-api
     env_file:
       - ./api/.env
+    volumes:
+      - ./api/logs:/app/logs
     ports:
       - "8002:3000"
