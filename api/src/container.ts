@@ -25,6 +25,7 @@ import { pingExternalProviders } from "./shared/health/provider-ping.js";
 import { registerOpenApi, routeDocs } from "./shared/http/openapi.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
+import { ApplicationLogService } from "./shared/logging/application-log.js";
 import { prisma } from "./infra/prisma/client.js";
 import { pingDatabase } from "./shared/health/database-ping.js";
 
@@ -69,6 +70,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   const checklist = createChecklistModule();
   const cost = new CostService();
   const policy = new PolicyService();
+  const logs = new ApplicationLogService(prisma);
   const llm = createLlmClient(env);
   const mcp = createMcpClient(env, {
     flights: flights.service,
@@ -92,6 +94,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     events: events.service,
     visa: visa.service,
     checklist: checklist.service,
+    logs,
   });
 
   const journey = createJourneyModule({
@@ -101,6 +104,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     cost,
     policy,
     images: images.service,
+    logs,
   });
   const profile = createProfileModule();
   const savedPlaces = createSavedPlaceModule();

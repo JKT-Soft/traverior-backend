@@ -19,6 +19,8 @@ import type { ChecklistService } from "../checklist/application/service.js";
 import { buildToolPlan } from "./infra/need-tools.js";
 import { buildSkeletonUserPrompt, buildSlotExtractUserPrompt, SLOT_EXTRACT_SYSTEM_PROMPT, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
 import { SlotExtractionSchema, type SlotExtraction } from "./domain/extract-slots.js";
+import type { ApplicationLogService } from "../../shared/logging/application-log.js";
+import { APPLICATION_LOG_TYPE } from "../../shared/logging/application-log-types.js";
 
 export type PlannerDeps = {
   llm: LlmClient;
@@ -31,6 +33,7 @@ export type PlannerDeps = {
   events: EventService;
   visa: VisaService;
   checklist: ChecklistService;
+  logs?: ApplicationLogService;
 };
 
 export type CheckpointToolResults = {
@@ -118,6 +121,7 @@ export class PlannerService {
   async planSkeleton(
     input: PlanSkeletonInput,
     normalizeOptions: NormalizeSkeletonOptions = {},
+    logContext: { tripId?: string; userId?: string } = {},
   ): Promise<{
     skeleton: TripSkeleton;
     llm: string;
@@ -150,8 +154,23 @@ export class PlannerService {
       );
     }
 
+    const normalized = normalizeTripSkeleton(skeleton.data, normalizeOptions);
+    await this.deps.logs?.record({
+      type: APPLICATION_LOG_TYPE.PLAN_SKELETON,
+      source: "planner.planSkeleton",
+      message: "Plan skeleton created",
+      tripId: logContext.tripId,
+      userId: logContext.userId,
+      payload: {
+        prompt,
+        preferences: input.preferences,
+        llmProvider: this.deps.llm.name,
+      },
+      result: normalized,
+    });
+
     return {
-      skeleton: normalizeTripSkeleton(skeleton.data, normalizeOptions),
+      skeleton: normalized,
       llm: this.deps.llm.name,
     };
   }

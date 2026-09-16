@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { AppError, ValidationError } from "../../shared/http/errors.js";
 import { InProcessMcpClient } from "../../shared/mcp/index.js";
 import { createMockFn } from "../../test/helpers.js";
+import { APPLICATION_LOG_TYPE } from "../../shared/logging/application-log-types.js";
 import type { LlmClient } from "./domain/ports.js";
 import { HeuristicLlmClient } from "./infra/heuristic-llm.js";
 import { PlannerService } from "./service.js";
@@ -151,6 +152,28 @@ describe("PlannerService", () => {
     assert.ok(skeleton.checkpoints.length >= 2);
     assert.equal(skeleton.checkpoints[0]?.city, "Tokyo");
     assert.ok(skeleton.checkpoints[0]?.needs.includes("flights"));
+  });
+
+  it("logs the normalized skeleton after creation", async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const planner = new PlannerService({
+      ...domainDeps(new HeuristicLlmClient()),
+      logs: {
+        record: async (input: Record<string, unknown>) => {
+          records.push(input);
+        },
+      },
+    } as never);
+
+    const { skeleton } = await planner.planSkeleton(
+      { prompt: "liburan ke singapore", preferences: { originCity: "Jakarta" } },
+      {},
+      { tripId: "trip-1", userId: "user-1" },
+    );
+
+    assert.equal(records[0]?.type, APPLICATION_LOG_TYPE.PLAN_SKELETON);
+    assert.equal(records[0]?.tripId, "trip-1");
+    assert.deepEqual(records[0]?.result, skeleton);
   });
 
   it("planSkeleton for singapore does not route to japan", async () => {

@@ -321,6 +321,10 @@ export class JourneyService {
           tripOriginCity: trip.originCity,
           preferences: mergedPreferences,
         },
+        {
+          tripId: input.tripId,
+          userId: input.userId,
+        },
       );
       await planLog?.progress({
         message: "LLM skeleton generated",
