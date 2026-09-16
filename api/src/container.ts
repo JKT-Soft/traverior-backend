@@ -25,6 +25,8 @@ import { pingExternalProviders } from "./shared/health/provider-ping.js";
 import { registerOpenApi, routeDocs } from "./shared/http/openapi.js";
 import { ok } from "./shared/http/reply.js";
 import { createFileLogger } from "./shared/logging/logger.js";
+import { prisma } from "./infra/prisma/client.js";
+import { pingDatabase } from "./shared/health/database-ping.js";
 
 export type AppContainer = {
   env: Env;
@@ -131,18 +133,24 @@ export async function createContainer(env: Env): Promise<AppContainer> {
       schema: routeDocs({
         tags: ["Health"],
         summary: "API health",
-        description: "Liveness plus short pings to the active external providers.",
+        description: "Liveness plus short pings to the database and active external providers.",
         auth: false,
       }),
     },
     async (_req, reply) => {
-      const providerPings = await pingExternalProviders(env);
+      const [database, providerPings] = await Promise.all([
+        pingDatabase(prisma, { skip: env.nodeEnv === "test" }),
+        pingExternalProviders(env),
+      ]);
+      const healthy = database.ok && providerPings.status === "ok";
       return ok(reply, {
         service: "traverior-api",
-        mark: providerPings.mark,
+        status: healthy ? "ok" : "degraded",
+        mark: healthy ? "✅" : "❌",
         architecture: "modular-monolith",
         framework: "fastify",
         auth: env.authMode,
+        database,
         llm: {
           provider: env.llm.provider,
           model: env.llm.model,

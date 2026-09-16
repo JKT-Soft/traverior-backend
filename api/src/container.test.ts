@@ -12,6 +12,8 @@ describe("createContainer", () => {
     assert.equal(health.statusCode, 200);
     assert.equal(health.json().data.service, "traverior-api");
     assert.equal(health.json().data.framework, "fastify");
+    assert.equal(health.json().data.database.status, "skipped");
+    assert.equal(health.json().data.database.ok, true);
     assert.equal(health.json().data.providerPings.status, "ok");
     assert.equal(health.json().data.mark, "✅");
     assert.equal(health.json().data.providerPings.mark, "✅");
