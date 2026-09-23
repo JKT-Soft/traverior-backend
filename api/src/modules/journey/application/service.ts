@@ -19,6 +19,7 @@ import type { PlanSkeletonInput } from "../../planner/domain/skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromNodes, coverLocationFromTrip } from "./cover-image.js";
 import { serializeTrip, serializeTripNode } from "./serialize-trip.js";
+import { serializePlanResponse } from "./serialize-plan-response.js";
 import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-preferences.js";
 import { buildPlanNodeDrafts, parentPathOf, slugify, type PlannedNodeDraft } from "./persist-plan.js";
 import { resolvePlanDates } from "../../planner/domain/clarifications.js";
@@ -168,6 +169,12 @@ export class JourneyService {
         return serializeTrip(trip);
       },
     ).then((trip) => this.withCoverImage(trip));
+  }
+
+  /** Public trip/plan payload: stops + catalog (no flat nodes[]). */
+  async getTripPlan(tripId: string, userId: string) {
+    const trip = await this.getTrip(tripId, userId);
+    return serializePlanResponse({ trip });
   }
 
   async listChildren(tripId: string, userId: string, parentId: string | null) {
@@ -413,14 +420,12 @@ export class JourneyService {
       await this.invalidateUserTrips(input.userId, input.tripId);
       const updated = await this.getTrip(input.tripId, input.userId);
 
-      const result = {
+      const result = serializePlanResponse({
         trip: updated,
         llm,
         mcp: execution.mcp,
-        skeleton,
-        execution,
         clarifications: recommended,
-      };
+      });
 
       await planLog?.complete({
         message: "Trip planning completed",

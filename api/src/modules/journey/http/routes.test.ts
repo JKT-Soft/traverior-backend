@@ -65,8 +65,20 @@ describe("journey http routes", () => {
     prismaMock.trip.findFirst = createMockFn(async () => ({
       id: "t1",
       userId: "user-1",
+      title: "T",
+      status: "draft",
       baseCurrency: "IDR",
-      nodes: [{ id: parentId, parentId: null, depth: 0, path: "trip", title: "T" }],
+      nodes: [
+        {
+          id: parentId,
+          parentId: null,
+          depth: 0,
+          path: "trip",
+          title: "T",
+          type: "JOURNEY",
+          sortOrder: 0,
+        },
+      ],
     }));
     prismaMock.pipelineNode.findMany = createMockFn(async () => []);
     prismaMock.pipelineNode.create = createMockFn(async () => ({ id: "n1" }));
@@ -86,7 +98,12 @@ describe("journey http routes", () => {
     assert.equal(badCreate.statusCode, 400);
 
     await injectJson(app, "POST", "/", { body: { title: "Trip" } });
-    await injectJson(app, "GET", "/t1");
+    const getTrip = await injectJson(app, "GET", "/t1");
+    assert.equal(getTrip.statusCode, 200);
+    assert.equal(getTrip.json().data.meta.schema, "trip+journey.stops+catalog");
+    assert.equal(getTrip.json().data.trip.name, "T");
+    assert.ok(Array.isArray(getTrip.json().data.journey.stops));
+    assert.equal(getTrip.json().data.trip.nodes, undefined);
     await injectJson(app, "GET", `/t1/nodes?parentId=${parentId}`);
     await injectJson(app, "GET", "/t1/nodes");
 

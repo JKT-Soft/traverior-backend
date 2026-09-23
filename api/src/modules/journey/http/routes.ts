@@ -131,7 +131,8 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
         schema: routeDocs({
           tags: ["Trips"],
           summary: "Get a trip",
-          description: "Load a journey and its pipeline tree.",
+          description:
+            "Load a journey in the stops + catalog plan shape (same schema as POST /plan).",
           params: tripIdParams,
           paramsExample: { tripId: SAMPLE_TRIP_ID },
         }),
@@ -139,8 +140,8 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
       async (req, reply) => {
         const auth = requireUser(req.user);
         const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
-        const trip = await service.getTrip(req.params.tripId, user.id);
-        return ok(reply, { trip });
+        const plan = await service.getTripPlan(req.params.tripId, user.id);
+        return ok(reply, plan);
       },
     );
 
@@ -150,7 +151,8 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
         schema: routeDocs({
           tags: ["Trips"],
           summary: "Plan a trip",
-          description: "Run the planner and persist pipeline nodes onto the journey.",
+          description:
+            "Run the planner, persist pipeline nodes, and return the stops + catalog plan response.",
           params: tripIdParams,
           paramsExample: { tripId: SAMPLE_TRIP_ID },
           body: planTripSchema,

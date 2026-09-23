@@ -3,6 +3,32 @@ import type { PlanSkeletonInput, SkeletonCheckpoint, TripSkeleton } from "./skel
 /** Default hub when the user does not specify a home city (Traverior primary market). */
 export const DEFAULT_ORIGIN_CITY = "Jakarta";
 
+const PRIMARY_AIRPORT_BY_CITY: Record<string, string> = {
+  amsterdam: "AMS",
+  bangkok: "BKK",
+  barcelona: "BCN",
+  beijing: "PEK",
+  cebu: "CEB",
+  denpasar: "DPS",
+  dubai: "DXB",
+  hongkong: "HKG",
+  jakarta: "CGK",
+  kualalumpur: "KUL",
+  kyoto: "KIX",
+  london: "LHR",
+  madrid: "MAD",
+  manila: "MNL",
+  melbourne: "MEL",
+  osaka: "KIX",
+  paris: "CDG",
+  rome: "FCO",
+  seoul: "ICN",
+  singapore: "SIN",
+  sydney: "SYD",
+  taipei: "TPE",
+  tokyo: "NRT",
+};
+
 export type NormalizeSkeletonOptions = {
   tripOriginCity?: string | null;
   preferences?: PlanSkeletonInput["preferences"];
@@ -10,6 +36,11 @@ export type NormalizeSkeletonOptions = {
 
 function citiesEqual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+export function resolvePrimaryAirportIata(city: string): string | undefined {
+  const key = city.toLowerCase().replace(/[^a-z]/g, "");
+  return PRIMARY_AIRPORT_BY_CITY[key];
 }
 
 export function resolveOriginCity(
@@ -42,6 +73,12 @@ export function normalizeTripSkeleton(
 ): TripSkeleton {
   const originCity = resolveOriginCity(skeleton, options);
   let checkpoints = [...skeleton.checkpoints];
+  checkpoints = checkpoints.map((checkpoint) => ({
+    ...checkpoint,
+    airportIata:
+      checkpoint.airportIata?.toUpperCase() ??
+      resolvePrimaryAirportIata(checkpoint.city),
+  }));
 
   while (
     checkpoints.length > 1 &&
@@ -77,6 +114,8 @@ export function normalizeTripSkeleton(
   return {
     ...skeleton,
     originCity,
+    originIata:
+      skeleton.originIata?.toUpperCase() ?? resolvePrimaryAirportIata(originCity),
     checkpoints,
   };
 }

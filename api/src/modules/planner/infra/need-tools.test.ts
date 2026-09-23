@@ -124,4 +124,62 @@ describe("need-tools", () => {
       adults: 1,
     });
   });
+
+  it("uses skeleton airport codes when request context omits IATA codes", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Europe",
+        originCity: "Jakarta",
+        originIata: "CGK",
+        checkpoints: [
+          {
+            city: "London",
+            countryCode: "GB",
+            airportIata: "LHR",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+          {
+            city: "Paris",
+            countryCode: "FR",
+            airportIata: "CDG",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+          {
+            city: "Amsterdam",
+            countryCode: "NL",
+            airportIata: "AMS",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+        ],
+      },
+      {
+        departureDate: "2026-12-01",
+        returnDate: "2026-12-07",
+        checkIn: "2026-12-01",
+        checkOut: "2026-12-07",
+      },
+    );
+
+    expectFlight(plan[0]?.calls, "CGK", "LHR", "2026-12-01");
+    expectFlight(plan[1]?.calls, "LHR", "CDG", "2026-12-04");
+    expectFlight(plan[2]?.calls, "AMS", "CGK", "2026-12-07");
+  });
 });
+
+function expectFlight(
+  calls: Array<{ tool: string; arguments: Record<string, unknown> }> | undefined,
+  origin: string,
+  destination: string,
+  departureDate: string,
+) {
+  const flight = calls?.find((call) => call.tool === "search_flights");
+  assert.equal(flight?.arguments.origin, origin);
+  assert.equal(flight?.arguments.destination, destination);
+  assert.equal(flight?.arguments.departureDate, departureDate);
+}

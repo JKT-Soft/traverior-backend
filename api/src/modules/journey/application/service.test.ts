@@ -277,7 +277,16 @@ describe("JourneyService", () => {
       destinationSummary: null,
       startDate: null,
       endDate: null,
-      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+      nodes: [
+        {
+          id: "root-1",
+          parentId: null,
+          depth: 0,
+          path: "trip",
+          type: "JOURNEY",
+          title: "Draft",
+        },
+      ] as Array<Record<string, unknown>>,
     };
 
     const db = {
@@ -317,6 +326,7 @@ describe("JourneyService", () => {
         create: async ({ data }: { data: { type: string; title: string; path: string; id?: string } }) => {
           const row = { id: `n-${created.length + 1}`, ...data };
           created.push({ type: data.type, title: data.title, path: data.path });
+          tripRow.nodes.push(row);
           return row;
         },
         update: async () => ({}),
@@ -401,8 +411,11 @@ describe("JourneyService", () => {
       preferences: { startDate: "2026-10-01", endDate: "2026-10-04" },
     });
 
-    assert.equal(result.llm, "heuristic");
-    assert.equal(result.mcp, "inprocess");
+    assert.equal(result.meta.llm, "heuristic");
+    assert.equal(result.meta.mcp, "inprocess");
+    assert.equal(result.trip.name, "Japan Adventure");
+    assert.ok(result.journey.stops.some((stop) => stop.name === "Osaka"));
+    assert.equal(Object.keys(result.catalog.hotels).length, 1);
     assert.ok(created.some((n) => n.type === "CHECKPOINT" && n.title === "Osaka"));
     assert.ok(created.some((n) => n.type === "BOOKING" && n.title === "Hotel A"));
     assert.equal(rolled, true);
@@ -417,6 +430,19 @@ describe("JourneyService", () => {
       ),
     );
     assert.ok(planLogUpdates.some((data) => data.status === "completed" && data.result));
+    const completed = planLogUpdates.find(
+      (data) => data.status === "completed" && data.result,
+    );
+    const logged = completed?.result as {
+      journey?: { stops?: unknown[] };
+      catalog?: { hotels?: Record<string, unknown> };
+      meta?: { schema?: string };
+      trip?: { nodes?: unknown };
+    };
+    assert.equal(logged?.meta?.schema, "trip+journey.stops+catalog");
+    assert.ok(Array.isArray(logged?.journey?.stops));
+    assert.equal(Object.keys(logged?.catalog?.hotels ?? {}).length, 1);
+    assert.equal(logged?.trip?.nodes, undefined);
   });
 
   it("planTrip rejects flexible-only dates without a concrete startDate", async () => {

@@ -51,6 +51,7 @@ Return ONE JSON object only (no markdown). Shape:
   "title": string,
   "summary": string,
   "originCity": string | optional,
+  "originIata": "CGK" | IATA-3 | optional,
   "destinationSummary": string,
   "assumedStartDate": "YYYY-MM-DD" | optional,
   "assumedEndDate": "YYYY-MM-DD" | optional,
@@ -60,6 +61,7 @@ Return ONE JSON object only (no markdown). Shape:
     {
       "city": string,
       "countryCode": "SG" | "JP" | ISO-2 | optional,
+      "airportIata": "SIN" | "NRT" | IATA-3 | optional,
       "role": "STAY" | "TRANSIT" | "DAY_TRIP",
       "days": number,
       "needs": ["flights"|"hotels"|"places"|"routes"|"weather"|"events"|"visa"|"checklist"],
@@ -72,6 +74,7 @@ Rules:
 - Structure a realistic multi-city itinerary from the user prompt + preferences.
 - The checkpoints array must list destination stops only (cities where the traveler stays or does day trips). Do NOT put the home/departure city in checkpoints.
 - originCity is the traveler's departure/home airport city, never a destination.
+- Set originIata and each checkpoint airportIata to the primary practical airport's uppercase 3-letter IATA code. These codes are required whenever the checkpoint needs "flights".
 - If the user names a departure city in the prompt, set originCity to that city (this overrides preferences).
 - If they do not name a departure city, set originCity from preferences.originCity when present.
 - If both are missing, OMIT originCity. Do not invent a city (including ${DEFAULT_ORIGIN_CITY}).

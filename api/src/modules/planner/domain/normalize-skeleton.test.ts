@@ -93,4 +93,19 @@ describe("normalizeTripSkeleton", () => {
     assert.equal(normalized.checkpoints[1]!.needs.includes("flights"), false);
     assert.ok(normalized.checkpoints[2]!.needs.includes("flights"));
   });
+
+  it("resolves common city airport codes when the LLM omits them", () => {
+    const normalized = normalizeTripSkeleton({
+      title: "Japan",
+      originCity: "Jakarta",
+      checkpoints: [
+        { city: "Tokyo", countryCode: "JP", role: "STAY", days: 3, needs: ["flights"] },
+        { city: "Kyoto", countryCode: "JP", role: "STAY", days: 2, needs: ["flights"] },
+      ],
+    });
+
+    assert.equal(normalized.originIata, "CGK");
+    assert.equal(normalized.checkpoints[0]?.airportIata, "NRT");
+    assert.equal(normalized.checkpoints[1]?.airportIata, "KIX");
+  });
 });

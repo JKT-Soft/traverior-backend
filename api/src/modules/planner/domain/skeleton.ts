@@ -16,6 +16,7 @@ export const CheckpointNeedSchema = z.enum(NEED_VALUES);
 export const SkeletonCheckpointSchema = z.object({
   city: z.string().min(1),
   countryCode: z.string().min(2).max(2).optional(),
+  airportIata: z.string().regex(/^[A-Za-z]{3}$/).optional(),
   role: z.enum(["STAY", "TRANSIT", "DAY_TRIP"]).default("STAY"),
   days: z.number().int().positive().max(30),
   needs: z.array(CheckpointNeedSchema).default([]),
@@ -26,6 +27,7 @@ export const TripSkeletonSchema = z.object({
   title: z.string().min(1),
   summary: z.string().optional(),
   originCity: z.string().optional(),
+  originIata: z.string().regex(/^[A-Za-z]{3}$/).optional(),
   destinationSummary: z.string().optional(),
   assumedStartDate: z.string().optional(),
   assumedEndDate: z.string().optional(),

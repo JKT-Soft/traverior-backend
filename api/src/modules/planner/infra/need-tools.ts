@@ -126,6 +126,7 @@ export function buildToolPlan(
   ctx: PlannerToolContext,
 ): Array<{ checkpoint: SkeletonCheckpoint; calls: ToolCallSpec[] }> {
   const lastIndex = skeleton.checkpoints.length - 1;
+  const homeIata = ctx.originIata ?? skeleton.originIata;
   const windows = allocateCheckpointWindows(skeleton.checkpoints, {
     start: ctx.checkIn ?? ctx.departureDate,
     end: ctx.checkOut ?? ctx.returnDate,
@@ -139,11 +140,20 @@ export function buildToolPlan(
     const returnOnly = isLast && !isFirst;
     const roundTrip = isFirst && isLast;
     const tripReturn = ctx.returnDate ?? ctx.checkOut;
+    const checkpointIata = checkpoint.airportIata ?? ctx.destinationIata;
+    const previousIata =
+      index > 0
+        ? (skeleton.checkpoints[index - 1]?.airportIata ?? ctx.destinationIata)
+        : homeIata;
 
-    let localCtx: PlannerToolContext = ctx;
+    let localCtx: PlannerToolContext = {
+      ...ctx,
+      originIata: returnOnly ? checkpointIata : previousIata,
+      destinationIata: returnOnly ? homeIata : checkpointIata,
+    };
     if (window) {
       localCtx = {
-        ...ctx,
+        ...localCtx,
         checkIn: window.start,
         checkOut: hotelCheckOutIso(window),
         departureDate: returnOnly
@@ -153,14 +163,6 @@ export function buildToolPlan(
             : window.start,
         returnDate: roundTrip ? tripReturn : undefined,
       };
-
-      if (returnOnly && ctx.originIata && ctx.destinationIata) {
-        localCtx = {
-          ...localCtx,
-          originIata: ctx.destinationIata,
-          destinationIata: ctx.originIata,
-        };
-      }
     }
 
     const calls: ToolCallSpec[] = [];
