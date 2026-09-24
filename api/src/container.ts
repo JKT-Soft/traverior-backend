@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Env } from "./config/env.js";
 import { createAuthModule } from "./modules/auth/index.js";
 import { createChecklistModule } from "./modules/checklist/index.js";
+import { createCurrencyModule } from "./modules/currency/index.js";
 import { CostService } from "./modules/cost/service.js";
 import { createEventModule } from "./modules/events/index.js";
 import { createFlightModule } from "./modules/flights/index.js";
@@ -46,6 +47,7 @@ export type AppContainer = {
     visa: ReturnType<typeof createVisaModule>["service"];
     images: ReturnType<typeof createImageModule>["service"];
     checklist: ReturnType<typeof createChecklistModule>["service"];
+    currency: ReturnType<typeof createCurrencyModule>["service"];
     journey: ReturnType<typeof createJourneyModule>["service"];
     profile: ReturnType<typeof createProfileModule>["service"];
     savedPlaces: ReturnType<typeof createSavedPlaceModule>["service"];
@@ -68,6 +70,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   const visa = createVisaModule(env, cache);
   const images = createImageModule(env, cache);
   const checklist = createChecklistModule();
+  const currency = createCurrencyModule(cache);
   const cost = new CostService();
   const policy = new PolicyService();
   const logs = new ApplicationLogService(prisma);
@@ -185,6 +188,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   await app.register(visa.routes, { prefix: "/v1/visa" });
   await app.register(images.routes, { prefix: "/v1/images" });
   await app.register(checklist.routes, { prefix: "/v1/checklist" });
+  await app.register(currency.routes, { prefix: "/v1/currency" });
   await app.register(journey.routes, { prefix: "/v1/trips" });
   await app.register(profile.routes, { prefix: "/v1/profile" });
   await app.register(savedPlaces.routes, { prefix: "/v1/saved-places" });
@@ -207,6 +211,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
       visa: visa.service,
       images: images.service,
       checklist: checklist.service,
+      currency: currency.service,
       journey: journey.service,
       profile: profile.service,
       savedPlaces: savedPlaces.service,
