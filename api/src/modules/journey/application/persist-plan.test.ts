@@ -120,6 +120,63 @@ describe("persist-plan", () => {
     assert.match(drafts[5]?.title ?? "", /Jakarta/i);
   });
 
+  it("persists travel.tips child when checklist includes tips", () => {
+    const drafts = buildPlanNodeDrafts(
+      {
+        title: "Japan",
+        originCity: "Jakarta",
+        checkpoints: [
+          {
+            city: "Osaka",
+            countryCode: "JP",
+            role: "STAY",
+            days: 2,
+            needs: ["checklist"],
+          },
+        ],
+      },
+      {
+        checkpoints: [
+          {
+            checkpoint: {
+              city: "Osaka",
+              role: "STAY",
+              days: 2,
+              needs: ["checklist"],
+            },
+            results: [
+              {
+                ok: true,
+                tool: "generate_checklist",
+                data: {
+                  provider: "internal",
+                  checklist: { items: [{ id: "passport", label: "Passport", done: false }] },
+                  tips: [
+                    {
+                      id: "getting-around",
+                      category: "getting_around",
+                      title: "Getting around",
+                      body: "Use an IC card in Osaka.",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      { originCity: "Jakarta", returnCity: "Jakarta" },
+    );
+
+    const checklist = drafts.find((d) => d.contentType === "checklist");
+    const tips = drafts.find((d) => d.contentType === "travel.tips");
+    assert.ok(checklist);
+    assert.ok(tips);
+    assert.equal(tips?.title, "Travel tips");
+    const content = tips?.content as { tips?: Array<{ title?: string }> };
+    assert.equal(content.tips?.[0]?.title, "Getting around");
+  });
+
   it("assigns contiguous stay dates across destination checkpoints", () => {
     const drafts = buildPlanNodeDrafts(
       {

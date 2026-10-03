@@ -16,5 +16,8 @@ describe("TemplateChecklistProvider", () => {
       result.items.find((i) => i.id === "adapter")?.label ?? "",
       /Osaka/,
     );
+    assert.ok(result.tips.length >= 4);
+    assert.equal(result.tips[0]?.category, "getting_around");
+    assert.match(result.tips[0]?.body ?? "", /Osaka/);
   });
 });

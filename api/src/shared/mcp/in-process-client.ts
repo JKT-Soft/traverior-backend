@@ -152,7 +152,13 @@ export class InProcessMcpClient implements McpToolClient {
             ? (args.visaDocuments as string[])
             : undefined,
         });
-        return { data: { provider: s.providerName, checklist } };
+        return {
+          data: {
+            provider: s.providerName,
+            checklist,
+            tips: checklist.tips,
+          },
+        };
       }
       default:
         throw new AppError(400, `Unknown MCP tool: ${tool}`, "MCP_TOOL_ERROR");

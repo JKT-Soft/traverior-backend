@@ -80,6 +80,36 @@ function firstArrayItem(value: unknown): unknown {
   return Array.isArray(value) ? value[0] : undefined;
 }
 
+function toolToNodeDrafts(
+  parentPath: string,
+  result: McpToolResult,
+  childSlug: string,
+): PlannedNodeDraft[] {
+  const primary = toolToNodeDraft(parentPath, result, childSlug);
+  const drafts = primary ? [primary] : [];
+  if (result.tool !== "generate_checklist" || !result.ok || !result.data || typeof result.data !== "object") {
+    return drafts;
+  }
+  const data = result.data as Record<string, unknown>;
+  const tips = Array.isArray(data.tips) ? data.tips : [];
+  if (tips.length === 0) return drafts;
+  drafts.push({
+    path: `${parentPath}/${childSlug}-tips`,
+    type: "MODULE",
+    title: "Travel tips",
+    contentType: "travel.tips",
+    content: {
+      tips,
+      provider: typeof data.provider === "string" ? data.provider : "internal",
+      fetchedAt: new Date().toISOString(),
+    } as Prisma.InputJsonValue,
+    provider: typeof data.provider === "string" ? data.provider : undefined,
+    origin: "ai",
+    isCustom: false,
+  });
+  return drafts;
+}
+
 function toolToNodeDraft(
   parentPath: string,
   result: McpToolResult,
@@ -252,6 +282,17 @@ function toolToNodeDraft(
         type: "MODULE",
         title: "Checklist",
         contentType: "checklist",
+        content: data as Prisma.InputJsonValue,
+        provider,
+        origin: "ai",
+        isCustom: false,
+      };
+    case "generate_travel_tips":
+      return {
+        path,
+        type: "MODULE",
+        title: "Travel tips",
+        contentType: "travel.tips",
         content: data as Prisma.InputJsonValue,
         provider,
         origin: "ai",
@@ -440,8 +481,9 @@ export function buildPlanNodeDrafts(
     const exec = execution.checkpoints[index];
     const results = exec?.results ?? [];
     results.forEach((result, toolIndex) => {
-      const child = toolToNodeDraft(checkpointPath, result, `${slugify(result.tool)}-${toolIndex + 1}`);
-      if (child) drafts.push(withChildSchedule(child, window, toolIndex));
+      for (const child of toolToNodeDrafts(checkpointPath, result, `${slugify(result.tool)}-${toolIndex + 1}`)) {
+        drafts.push(withChildSchedule(child, window, toolIndex));
+      }
     });
   });
 

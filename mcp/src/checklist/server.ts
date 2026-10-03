@@ -38,7 +38,18 @@ export async function registerChecklistTools(
     async (args) => {
       try {
         const checklist = await service.generate(args);
-        return jsonResult({ provider: service.providerName, checklist });
+        const tips =
+          checklist &&
+          typeof checklist === "object" &&
+          "tips" in checklist &&
+          Array.isArray((checklist as { tips?: unknown }).tips)
+            ? (checklist as { tips: unknown[] }).tips
+            : undefined;
+        return jsonResult({
+          provider: service.providerName,
+          checklist,
+          ...(tips ? { tips } : {}),
+        });
       } catch (err) {
         return errorResult(err);
       }

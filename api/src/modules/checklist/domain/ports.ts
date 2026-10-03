@@ -11,10 +11,18 @@ export type ChecklistItem = {
   source: "template" | "visa" | "user";
 };
 
+export type TravelTip = {
+  id: string;
+  category: "getting_around" | "money" | "connectivity" | "etiquette" | "safety" | "packing";
+  title: string;
+  body: string;
+};
+
 export type ChecklistResult = {
   contentType: "checklist";
   provider: "internal";
   items: ChecklistItem[];
+  tips: TravelTip[];
   fetchedAt: string;
 };
 

@@ -3,6 +3,7 @@ import type {
   ChecklistProvider,
   ChecklistQuery,
   ChecklistResult,
+  TravelTip,
 } from "../domain/ports.js";
 
 export class TemplateChecklistProvider implements ChecklistProvider {
@@ -28,7 +29,50 @@ export class TemplateChecklistProvider implements ChecklistProvider {
       contentType: "checklist",
       provider: "internal",
       items: [...visaItems, ...base],
+      tips: tipsForDestination(query.destination),
       fetchedAt: new Date().toISOString(),
     };
   }
+}
+
+function tipsForDestination(destination: string): TravelTip[] {
+  const city = destination.trim() || "your destination";
+  return [
+    {
+      id: "getting-around",
+      category: "getting_around",
+      title: "Getting around",
+      body: `In ${city}, prioritize transit cards or ride-hailing for short hops. Save offline maps and pin your hotel before you leave Wi‑Fi.`,
+    },
+    {
+      id: "money",
+      category: "money",
+      title: "Cash & payments",
+      body: `Keep a small amount of local cash for markets and transit. Cards work in many spots, but smaller shops may be cash-only.`,
+    },
+    {
+      id: "connectivity",
+      category: "connectivity",
+      title: "Stay connected",
+      body: `Pick up an eSIM or local SIM on arrival, and download offline translations plus key booking confirmations.`,
+    },
+    {
+      id: "etiquette",
+      category: "etiquette",
+      title: "Local etiquette",
+      body: `Learn a few polite phrases, check temple or restaurant norms before visiting, and ask before photographing people.`,
+    },
+    {
+      id: "safety",
+      category: "safety",
+      title: "Safety basics",
+      body: `Share your live location with a companion, keep copies of ID offline, and note the nearest clinic or embassy contact.`,
+    },
+    {
+      id: "packing",
+      category: "packing",
+      title: "Packing smart",
+      body: `Pack layers for weather swings, a compact umbrella, comfortable walking shoes, and any medication in carry-on.`,
+    },
+  ];
 }
