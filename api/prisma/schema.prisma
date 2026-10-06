@@ -1,3 +1,7 @@
+// Schema contract: docs/new_db_design_note.md
+// Partial unique indexes and CHECK constraints live in the SQL migration
+// (Prisma cannot express WHERE deleted_at IS NULL or the booking FK check).
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,51 +18,118 @@ enum TripStatus {
   active
   completed
   archived
+
+  @@map("trip_status")
 }
 
-enum NodeType {
-  JOURNEY
-  CHECKPOINT
-  LEG
-  ACTIVITY
-  POI
-  BOOKING
-  MODULE
-  LEAF
+enum StopKind {
+  hub
+  travel
+  stay
+  day
+  activity
+  transit
+
+  @@map("stop_kind")
 }
 
-enum CheckpointKind {
-  ORIGIN
-  TRANSIT
-  STAY
-  DAY_TRIP
-  RETURN
+enum HubRole {
+  origin
+  return
+
+  @@map("hub_role")
 }
 
-enum NodeStatus {
+enum StopStatus {
   planned
   active
   completed
   disrupted
   skipped
+
+  @@map("stop_status")
 }
 
-enum NodeOrigin {
+enum ContentOrigin {
   ai
   user
   api
+
+  @@map("content_origin")
+}
+
+enum BookingKind {
+  flight
+  hotel
+  event
+  place
+  route
+  weather
+  visa
+  checklist
+
+  @@map("booking_kind")
+}
+
+enum BookingRole {
+  recommended
+  alternative
+  selected
+  confirmed
+
+  @@map("booking_role")
+}
+
+enum BudgetScope {
+  trip
+  journey
+  stop
+
+  @@map("budget_scope")
+}
+
+enum BudgetCategory {
+  transport
+  accommodation
+  activities
+  food
+  other
+  total
+
+  @@map("budget_category")
+}
+
+enum MediaRole {
+  cover
+  thumbnail
+  gallery
+
+  @@map("media_role")
+}
+
+enum NoteKind {
+  about
+  user
+  system
+  checklist
+
+  @@map("note_kind")
 }
 
 enum BudgetStyle {
   budget
   balanced
   luxury
+
+  @@map("budget_style")
 }
 
 enum Pace {
   relaxed
   moderate
   packed
+
+  @@map("pace")
 }
 
 enum TravelWith {
@@ -66,6 +137,16 @@ enum TravelWith {
   couple
   family
   friends
+
+  @@map("travel_with")
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+
+  @@map("alert_severity")
 }
 
 enum EditAction {
@@ -77,163 +158,546 @@ enum EditAction {
   reorder
   replace
   replan
+
+  @@map("edit_action")
 }
 
-enum AlertSeverity {
-  info
-  warning
-  critical
+enum PlanningPhase {
+  collecting
+  draft
+  searching
+  ready
+
+  @@map("planning_phase")
+}
+
+enum PlanningConcept {
+  culture
+  entertainment
+  business
+  food
+  family
+
+  @@map("planning_concept")
+}
+
+enum PlanningMessageRole {
+  user
+  assistant
+
+  @@map("planning_message_role")
+}
+
+enum PlanningMessageKind {
+  text
+  skeleton
+  clarification
+
+  @@map("planning_message_kind")
 }
 
 model User {
   id           String   @id @default(uuid()) @db.Uuid
-  firebaseUid  String   @unique
-  email        String
-  displayName  String?
-  photoUrl     String?
-  locale       String   @default("id")
-  homeCurrency String   @default("IDR")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  firebaseUid  String   @unique @map("firebase_uid")
+  email        String   @map("email")
+  displayName  String?  @map("display_name")
+  photoUrl     String?  @map("photo_url")
+  locale       String   @default("id") @map("locale")
+  homeCurrency String   @default("IDR") @map("home_currency") @db.Char(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   preference  UserPreference?
   trips       Trip[]
-  editLogs    PipelineEditLog[]
+  editLogs    StopEditLog[]
   logs        ApplicationLog[]
   savedPlaces SavedPlace[]
+
+  @@map("users")
 }
 
 model UserPreference {
-  id          String      @id @default(uuid()) @db.Uuid
-  userId      String      @unique @db.Uuid
-  budgetMax   Decimal?    @db.Decimal(14, 2)
-  budgetStyle BudgetStyle @default(balanced)
-  pace        Pace        @default(moderate)
-  dietary     String[]    @default([])
-  interests   String[]    @default([])
-  travelWith  TravelWith?
-  avoid       String[]    @default([])
-  extra       Json?
-  updatedAt   DateTime    @updatedAt
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @unique @map("user_id") @db.Uuid
+  budgetMax       Decimal?    @map("budget_max") @db.Decimal(14, 2)
+  budgetStyle     BudgetStyle @default(balanced) @map("budget_style")
+  pace            Pace        @default(moderate) @map("pace")
+  dietary         String[]    @default([]) @map("dietary")
+  interests       String[]    @default([]) @map("interests")
+  travelWith      TravelWith? @map("travel_with")
+  avoid           String[]    @default([]) @map("avoid")
+  homeCity        String?     @map("home_city")
+  passportCountry String?     @map("passport_country") @db.Char(2)
+  extra           Json?       @map("extra")
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
 
 model Trip {
   id                   String     @id @default(uuid()) @db.Uuid
-  userId               String     @db.Uuid
-  title                String
-  status               TripStatus @default(draft)
-  originCity           String?
-  destinationSummary   String?
-  startDate            DateTime?  @db.Date
-  endDate              DateTime?  @db.Date
-  partySize            Int        @default(1)
-  baseCurrency         String     @default("IDR")
-  totalCostAmount      Decimal    @default(0) @db.Decimal(14, 2)
-  totalCostIsEstimate  Boolean    @default(true)
-  totalDurationMinutes Int        @default(0)
-  rootNodeId           String?    @db.Uuid
-  planningVersion      Int        @default(0)
-  lastPlannedAt        DateTime?
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  userId               String     @map("user_id") @db.Uuid
+  title                String     @map("title")
+  status               TripStatus @default(draft) @map("status")
+  originCity           String?    @map("origin_city")
+  destinationSummary   String?    @map("destination_summary")
+  startDate            DateTime?  @map("start_date") @db.Date
+  endDate              DateTime?  @map("end_date") @db.Date
+  partySize            Int        @default(1) @map("party_size")
+  baseCurrency         String     @default("IDR") @map("base_currency") @db.Char(3)
+  totalCostAmount      Decimal    @default(0) @map("total_cost_amount") @db.Decimal(14, 2)
+  totalCostIsEstimate  Boolean    @default(true) @map("total_cost_is_estimate")
+  totalDurationMinutes Int        @default(0) @map("total_duration_minutes")
+  coverMediaId         String?    @map("cover_media_id") @db.Uuid
+  planningVersion      Int        @default(0) @map("planning_version")
+  lastPlannedAt        DateTime?  @map("last_planned_at") @db.Timestamptz(3)
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  nodes       PipelineNode[]
+  coverMedia  Media?            @relation("TripCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
+  journey     Journey?
+  medias      Media[]           @relation("TripMedias")
+  notes       Note[]
+  budgets     Budget[]
   alerts      TripAlert[]
-  editLogs    PipelineEditLog[]
+  editLogs    StopEditLog[]
   logs        ApplicationLog[]
   savedPlaces SavedPlace[]
+  flights     CatalogFlight[]
+  hotels      CatalogHotel[]
+  events      CatalogEvent[]
+  places      CatalogPlace[]
+  routes      CatalogRoute[]
+  weathers    CatalogWeather[]
+  visas       CatalogVisa[]
+  checklists  CatalogChecklist[]
+  planningDraft    PlanningDraft?
+  planningMessages PlanningMessage[]
 
   @@index([userId, status])
   @@index([userId, updatedAt])
+  @@map("trips")
 }
 
-model PipelineNode {
-  id                String          @id @default(uuid()) @db.Uuid
-  tripId            String          @db.Uuid
-  parentId          String?         @db.Uuid
-  depth             Int
-  path              String
-  sortOrder         Int             @default(0)
-  type              NodeType
-  checkpointKind    CheckpointKind?
-  title             String
-  subtitle          String?
-  status            NodeStatus      @default(planned)
-  contentType       String?
-  content           Json?
-  costAmount        Decimal         @default(0) @db.Decimal(14, 2)
-  costCurrency      String          @default("IDR")
-  costIsEstimate    Boolean         @default(true)
-  durationMinutes   Int             @default(0)
-  distanceMeters    Int?
-  scheduleStart     DateTime?
-  scheduleEnd       DateTime?
-  locationLat       Float?
-  locationLng       Float?
-  locationLabel     String?
-  deepLinkUrl       String?
-  provider          String?
-  providerRef       String?
-  origin            NodeOrigin      @default(ai)
-  isLocked          Boolean         @default(false)
-  isCustom          Boolean         @default(false)
-  userNotes         String?
-  suppressAiRestore Boolean         @default(false)
-  deletedAt         DateTime?
-  lastRefreshedAt   DateTime?
-  version           Int             @default(1)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+model Journey {
+  id        String   @id @default(uuid()) @db.Uuid
+  tripId    String   @unique @map("trip_id") @db.Uuid
+  name      String   @map("name")
+  summary   String?  @map("summary")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  trip        Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  parent      PipelineNode?     @relation("NodeTree", fields: [parentId], references: [id])
-  children    PipelineNode[]    @relation("NodeTree")
-  editLogs    PipelineEditLog[]
+  trip    Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stops   Stop[]
+  budgets Budget[]
+
+  @@map("journeys")
+}
+
+/// Nested itinerary tree. v1 planner writes top-level hub | travel | stay | transit.
+/// parentStopId is ready for day / activity children.
+model Stop {
+  id                String        @id @default(uuid()) @db.Uuid
+  journeyId         String        @map("journey_id") @db.Uuid
+  parentStopId      String?       @map("parent_stop_id") @db.Uuid
+  kind              StopKind      @map("kind")
+  hubRole           HubRole?      @map("hub_role")
+  slug              String        @map("slug")
+  name              String        @map("name")
+  subtitle          String?       @map("subtitle")
+  status            StopStatus    @default(planned) @map("status")
+  sortOrder         Int           @default(0) @map("sort_order")
+  depth             Int           @default(0) @map("depth")
+  path              String        @map("path")
+  days              Int?          @map("days")
+  countryCode       String?       @map("country_code") @db.Char(2)
+  city              String?       @map("city")
+  airportIata       String?       @map("airport_iata") @db.Char(3)
+  scheduleStart     DateTime?     @map("schedule_start") @db.Timestamptz(3)
+  scheduleEnd       DateTime?     @map("schedule_end") @db.Timestamptz(3)
+  dateStart         DateTime?     @map("date_start") @db.Date
+  dateEnd           DateTime?     @map("date_end") @db.Date
+  locationLat       Float?        @map("location_lat")
+  locationLng       Float?        @map("location_lng")
+  locationLabel     String?       @map("location_label")
+  origin            ContentOrigin @default(ai) @map("origin")
+  isLocked          Boolean       @default(false) @map("is_locked")
+  isCustom          Boolean       @default(false) @map("is_custom")
+  suppressAiRestore Boolean       @default(false) @map("suppress_ai_restore")
+  version           Int           @default(1) @map("version")
+  deletedAt         DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  lastRefreshedAt   DateTime?     @map("last_refreshed_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  journey     Journey       @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  parent      Stop?         @relation("StopTree", fields: [parentStopId], references: [id], onDelete: Cascade)
+  children    Stop[]        @relation("StopTree")
+  bookings    Booking[]
+  medias      Media[]
+  notes       Note[]
+  budgets     Budget[]
   alerts      TripAlert[]
+  editLogs    StopEditLog[]
   savedPlaces SavedPlace[]
 
-  @@index([tripId, parentId, sortOrder])
-  @@index([tripId, path])
-  @@index([tripId, type])
-  @@index([tripId, deletedAt])
+  @@index([journeyId, parentStopId, sortOrder])
+  @@index([journeyId, path])
+  @@index([journeyId, kind])
+  @@index([journeyId, deletedAt])
+  @@index([journeyId, slug])
+  @@map("stops")
 }
 
-model PipelineEditLog {
-  id        String     @id @default(uuid()) @db.Uuid
-  tripId    String     @db.Uuid
-  nodeId    String     @db.Uuid
-  userId    String     @db.Uuid
-  action    EditAction
-  before    Json?
-  after     Json?
-  createdAt DateTime   @default(now())
+model Booking {
+  id                 String        @id @default(uuid()) @db.Uuid
+  stopId             String        @map("stop_id") @db.Uuid
+  kind               BookingKind   @map("kind")
+  role               BookingRole   @default(recommended) @map("role")
+  sortOrder          Int           @default(0) @map("sort_order")
+  catalogFlightId    String?       @map("catalog_flight_id") @db.Uuid
+  catalogHotelId     String?       @map("catalog_hotel_id") @db.Uuid
+  catalogEventId     String?       @map("catalog_event_id") @db.Uuid
+  catalogPlaceId     String?       @map("catalog_place_id") @db.Uuid
+  catalogRouteId     String?       @map("catalog_route_id") @db.Uuid
+  catalogWeatherId   String?       @map("catalog_weather_id") @db.Uuid
+  catalogVisaId      String?       @map("catalog_visa_id") @db.Uuid
+  catalogChecklistId String?       @map("catalog_checklist_id") @db.Uuid
+  deepLinkUrl        String?       @map("deep_link_url")
+  costAmount         Decimal?      @map("cost_amount") @db.Decimal(14, 2)
+  costCurrency       String?       @map("cost_currency") @db.Char(3)
+  costIsEstimate     Boolean       @default(true) @map("cost_is_estimate")
+  origin             ContentOrigin @default(ai) @map("origin")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  trip Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  node PipelineNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stop      Stop              @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  flight    CatalogFlight?    @relation(fields: [catalogFlightId], references: [id], onDelete: SetNull)
+  hotel     CatalogHotel?     @relation(fields: [catalogHotelId], references: [id], onDelete: SetNull)
+  event     CatalogEvent?     @relation(fields: [catalogEventId], references: [id], onDelete: SetNull)
+  place     CatalogPlace?     @relation(fields: [catalogPlaceId], references: [id], onDelete: SetNull)
+  route     CatalogRoute?     @relation(fields: [catalogRouteId], references: [id], onDelete: SetNull)
+  weather   CatalogWeather?   @relation(fields: [catalogWeatherId], references: [id], onDelete: SetNull)
+  visa      CatalogVisa?      @relation(fields: [catalogVisaId], references: [id], onDelete: SetNull)
+  checklist CatalogChecklist? @relation(fields: [catalogChecklistId], references: [id], onDelete: SetNull)
 
-  @@index([tripId, createdAt])
-  @@index([nodeId, createdAt])
+  @@index([stopId, kind, sortOrder])
+  @@map("bookings")
+}
+
+model Media {
+  id           String    @id @default(uuid()) @db.Uuid
+  tripId       String?   @map("trip_id") @db.Uuid
+  stopId       String?   @map("stop_id") @db.Uuid
+  role         MediaRole @default(gallery) @map("role")
+  imageUrl     String    @map("image_url")
+  thumbnailUrl String?   @map("thumbnail_url")
+  provider     String?   @map("provider")
+  providerRef  String?   @map("provider_ref")
+  attribution  Json?     @map("attribution")
+  sortOrder    Int       @default(0) @map("sort_order")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  trip      Trip?  @relation("TripMedias", fields: [tripId], references: [id], onDelete: Cascade)
+  stop      Stop?  @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  coverFor  Trip[] @relation("TripCover")
+
+  @@index([tripId])
+  @@index([stopId])
+  @@map("medias")
+}
+
+model Budget {
+  id          String         @id @default(uuid()) @db.Uuid
+  tripId      String?        @map("trip_id") @db.Uuid
+  journeyId   String?        @map("journey_id") @db.Uuid
+  stopId      String?        @map("stop_id") @db.Uuid
+  scope       BudgetScope    @map("scope")
+  category    BudgetCategory @default(total) @map("category")
+  amount      Decimal        @map("amount") @db.Decimal(14, 2)
+  currency    String         @map("currency") @db.Char(3)
+  isEstimate  Boolean        @default(true) @map("is_estimate")
+  spentAmount Decimal?       @map("spent_amount") @db.Decimal(14, 2)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip    Trip?    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  journey Journey? @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  stop    Stop?    @relation(fields: [stopId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, scope])
+  @@index([stopId, category])
+  @@map("budgets")
+}
+
+model Note {
+  id        String        @id @default(uuid()) @db.Uuid
+  tripId    String?       @map("trip_id") @db.Uuid
+  stopId    String?       @map("stop_id") @db.Uuid
+  kind      NoteKind      @default(about) @map("kind")
+  title     String?       @map("title")
+  body      String        @map("body")
+  origin    ContentOrigin @default(ai) @map("origin")
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip Trip? @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stop Stop? @relation(fields: [stopId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([stopId])
+  @@map("notes")
+}
+
+model CatalogFlight {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tripId             String    @map("trip_id") @db.Uuid
+  provider           String    @map("provider")
+  providerRef        String?   @map("provider_ref")
+  airlineName        String?   @map("airline_name")
+  airlineIata        String?   @map("airline_iata") @db.Char(2)
+  carrier            String?   @map("carrier")
+  flightNumber       String?   @map("flight_number")
+  originIata         String    @map("origin_iata") @db.Char(3)
+  destinationIata    String    @map("destination_iata") @db.Char(3)
+  originAirport      Json?     @map("origin_airport")
+  destinationAirport Json?     @map("destination_airport")
+  departureAt        DateTime? @map("departure_at") @db.Timestamptz(3)
+  arrivalAt          DateTime? @map("arrival_at") @db.Timestamptz(3)
+  cabin              String?   @map("cabin")
+  cabinLabel         String?   @map("cabin_label")
+  stops              Int?      @map("stops")
+  transit            String?   @map("transit")
+  durationMinutes    Int?      @map("duration_minutes")
+  baggage            Json?     @map("baggage")
+  slices             Json?     @map("slices")
+  priceAmount        Decimal?  @map("price_amount") @db.Decimal(14, 2)
+  priceCurrency      String?   @map("price_currency") @db.Char(3)
+  priceIsEstimate    Boolean   @default(false) @map("price_is_estimate")
+  deepLinkUrl        String?   @map("deep_link_url")
+  raw                Json?     @map("raw")
+  fetchedAt          DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@index([provider, providerRef])
+  @@map("catalog_flights")
+}
+
+model CatalogHotel {
+  id              String    @id @default(uuid()) @db.Uuid
+  tripId          String    @map("trip_id") @db.Uuid
+  provider        String    @map("provider")
+  providerRef     String?   @map("provider_ref")
+  hotelId         String?   @map("hotel_id")
+  name            String    @map("name")
+  stars           Int?      @map("stars")
+  rating          Decimal?  @map("rating") @db.Decimal(3, 1)
+  reviewCount     Int?      @map("review_count")
+  boardType       String?   @map("board_type")
+  boardName       String?   @map("board_name")
+  nights          Int?      @map("nights")
+  address         String?   @map("address")
+  city            String?   @map("city")
+  countryCode     String?   @map("country_code") @db.Char(2)
+  lat             Float?    @map("lat")
+  lng             Float?    @map("lng")
+  checkIn         DateTime? @map("check_in") @db.Date
+  checkOut        DateTime? @map("check_out") @db.Date
+  checkInTime     String?   @map("check_in_time")
+  checkOutTime    String?   @map("check_out_time")
+  refundable      Boolean?  @map("refundable")
+  priceAmount     Decimal?  @map("price_amount") @db.Decimal(14, 2)
+  priceCurrency   String?   @map("price_currency") @db.Char(3)
+  priceIsEstimate Boolean   @default(true) @map("price_is_estimate")
+  deepLinkUrl     String?   @map("deep_link_url")
+  raw             Json?     @map("raw")
+  fetchedAt       DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@index([provider, providerRef])
+  @@map("catalog_hotels")
+}
+
+model CatalogEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  tripId          String    @map("trip_id") @db.Uuid
+  provider        String    @map("provider")
+  providerRef     String?   @map("provider_ref")
+  externalId      String?   @map("external_id")
+  name            String    @map("name")
+  startsAt        DateTime? @map("starts_at") @db.Timestamptz(3)
+  endsAt          DateTime? @map("ends_at") @db.Timestamptz(3)
+  isFree          Boolean?  @map("is_free")
+  venueName       String?   @map("venue_name")
+  address         String?   @map("address")
+  lat             Float?    @map("lat")
+  lng             Float?    @map("lng")
+  priceAmount     Decimal?  @map("price_amount") @db.Decimal(14, 2)
+  priceCurrency   String?   @map("price_currency") @db.Char(3)
+  priceIsEstimate Boolean   @default(true) @map("price_is_estimate")
+  deepLinkUrl     String?   @map("deep_link_url")
+  raw             Json?     @map("raw")
+  fetchedAt       DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@index([provider, providerRef])
+  @@map("catalog_events")
+}
+
+model CatalogVisa {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tripId             String    @map("trip_id") @db.Uuid
+  provider           String    @default("static") @map("provider")
+  passportCountry    String    @map("passport_country") @db.Char(2)
+  destinationCountry String    @map("destination_country") @db.Char(2)
+  summary            String?   @map("summary")
+  documents          Json?     @map("documents")
+  requirements       Json?     @map("requirements")
+  raw                Json?     @map("raw")
+  fetchedAt          DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@map("catalog_visas")
+}
+
+model CatalogWeather {
+  id            String    @id @default(uuid()) @db.Uuid
+  tripId        String    @map("trip_id") @db.Uuid
+  provider      String    @map("provider")
+  lat           Float?    @map("lat")
+  lng           Float?    @map("lng")
+  timezone      String?   @map("timezone")
+  currentTempC  Decimal?  @map("current_temp_c") @db.Decimal(5, 2)
+  alerts        Json?     @map("alerts")
+  daily         Json?     @map("daily")
+  raw           Json?     @map("raw")
+  fetchedAt     DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@map("catalog_weathers")
+}
+
+model CatalogPlace {
+  id          String    @id @default(uuid()) @db.Uuid
+  tripId      String    @map("trip_id") @db.Uuid
+  provider    String    @map("provider")
+  kind        String    @map("kind")
+  title       String    @map("title")
+  places      Json      @map("places")
+  raw         Json?     @map("raw")
+  fetchedAt   DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@map("catalog_places")
+}
+
+model CatalogRoute {
+  id              String    @id @default(uuid()) @db.Uuid
+  tripId          String    @map("trip_id") @db.Uuid
+  provider        String    @map("provider")
+  mode            String?   @map("mode")
+  distanceMeters  Int?      @map("distance_meters")
+  durationMinutes Int?      @map("duration_minutes")
+  stepsSummary    Json?     @map("steps_summary")
+  polyline        String?   @map("polyline")
+  raw             Json?     @map("raw")
+  fetchedAt       DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@map("catalog_routes")
+}
+
+model CatalogChecklist {
+  id        String    @id @default(uuid()) @db.Uuid
+  tripId    String    @map("trip_id") @db.Uuid
+  provider  String    @default("internal") @map("provider")
+  title     String    @default("Travel checklist") @map("title")
+  items     Json      @map("items")
+  raw       Json?     @map("raw")
+  fetchedAt DateTime? @map("fetched_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip     Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([tripId])
+  @@map("catalog_checklists")
+}
+
+model TripAlert {
+  id        String        @id @default(uuid()) @db.Uuid
+  tripId    String        @map("trip_id") @db.Uuid
+  stopId    String?       @map("stop_id") @db.Uuid
+  kind      String        @map("kind")
+  severity  AlertSeverity @default(info) @map("severity")
+  title     String        @map("title")
+  body      String        @map("body")
+  payload   Json?         @map("payload")
+  isRead    Boolean       @default(false) @map("is_read")
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  trip Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stop Stop? @relation(fields: [stopId], references: [id], onDelete: SetNull)
+
+  @@index([tripId, isRead, createdAt])
+  @@map("trip_alerts")
 }
 
 model ApplicationLog {
   id          String    @id @default(uuid()) @db.Uuid
-  type        String
-  level       String    @default("info")
-  source      String?
-  status      String?
-  message     String?
-  userId      String?   @db.Uuid
-  tripId      String?   @db.Uuid
-  payload     Json?
-  result      Json?
-  error       Json?
-  durationMs  Int?
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
+  type        String    @map("type")
+  level       String    @default("info") @map("level")
+  source      String?   @map("source")
+  status      String?   @map("status")
+  message     String?   @map("message")
+  userId      String?   @map("user_id") @db.Uuid
+  tripId      String?   @map("trip_id") @db.Uuid
+  payload     Json?     @map("payload")
+  result      Json?     @map("result")
+  error       Json?     @map("error")
+  durationMs  Int?      @map("duration_ms")
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
 
   trip Trip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -243,72 +707,122 @@ model ApplicationLog {
   @@index([status, startedAt])
   @@index([tripId, startedAt])
   @@index([userId, startedAt])
-}
-
-model TripAlert {
-  id        String        @id @default(uuid()) @db.Uuid
-  tripId    String        @db.Uuid
-  nodeId    String?       @db.Uuid
-  kind      String
-  severity  AlertSeverity @default(info)
-  title     String
-  body      String
-  payload   Json?
-  isRead    Boolean       @default(false)
-  createdAt DateTime      @default(now())
-
-  trip Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  node PipelineNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
-
-  @@index([tripId, isRead, createdAt])
-}
-
-model ProviderCache {
-  id        String   @id @default(uuid()) @db.Uuid
-  cacheKey  String   @unique
-  provider  String
-  toolName  String
-  request   Json
-  response  Json
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([expiresAt])
-}
-
-model ExchangeRate {
-  base      String
-  quote     String
-  rate      Decimal  @db.Decimal(18, 8)
-  fetchedAt DateTime
-
-  @@id([base, quote])
+  @@map("application_logs")
 }
 
 model SavedPlace {
   id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  name        String
-  address     String?
-  city        String?
-  country     String?
-  lat         Float?
-  lng         Float?
-  source      String   @default("user")
-  provider    String?
-  providerRef String?
-  tripId      String?  @db.Uuid
-  nodeId      String?  @db.Uuid
-  notes       String?
-  extra       Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @map("name")
+  address     String?  @map("address")
+  city        String?  @map("city")
+  country     String?  @map("country")
+  lat         Float?   @map("lat")
+  lng         Float?   @map("lng")
+  source      String   @default("user") @map("source")
+  provider    String?  @map("provider")
+  providerRef String?  @map("provider_ref")
+  tripId      String?  @map("trip_id") @db.Uuid
+  stopId      String?  @map("stop_id") @db.Uuid
+  notes       String?  @map("notes")
+  extra       Json?    @map("extra")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trip Trip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
-  node PipelineNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  stop Stop? @relation(fields: [stopId], references: [id], onDelete: SetNull)
 
   @@unique([userId, provider, providerRef])
   @@index([userId, createdAt])
-  @@index([userId, nodeId])
+  @@index([userId, stopId])
+  @@map("saved_places")
+}
+
+model StopEditLog {
+  id        String     @id @default(uuid()) @db.Uuid
+  tripId    String     @map("trip_id") @db.Uuid
+  stopId    String     @map("stop_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  action    EditAction @map("action")
+  before    Json?      @map("before")
+  after     Json?      @map("after")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stop Stop @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, createdAt])
+  @@index([stopId, createdAt])
+  @@map("stop_edit_logs")
+}
+
+model ProviderCache {
+  id        String   @id @default(uuid()) @db.Uuid
+  cacheKey  String   @unique @map("cache_key")
+  provider  String   @map("provider")
+  toolName  String   @map("tool_name")
+  request   Json     @map("request")
+  response  Json     @map("response")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("provider_cache")
+}
+
+model ExchangeRate {
+  base      String   @map("base") @db.Char(3)
+  quote     String   @map("quote") @db.Char(3)
+  rate      Decimal  @map("rate") @db.Decimal(18, 8)
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(3)
+
+  @@id([base, quote])
+  @@map("exchange_rates")
+}
+
+/// Live planning chat state. One row per trip. stops and selectedStopId refer to
+/// draft keys inside `stops`, not rows in the stops table.
+/// Message payload checks live in the SQL migration.
+model PlanningDraft {
+  id             String           @id @default(uuid()) @db.Uuid
+  tripId         String           @unique @map("trip_id") @db.Uuid
+  phase          PlanningPhase    @default(collecting) @map("phase")
+  title          String?          @map("title")
+  concept        PlanningConcept? @map("concept")
+  tone           String?          @map("tone")
+  originCity     String?          @map("origin_city")
+  startDate      DateTime?        @map("start_date") @db.Date
+  endDate        DateTime?        @map("end_date") @db.Date
+  partySize      Int?             @map("party_size")
+  selectedStopId String?          @map("selected_stop_id")
+  stops          Json             @default("[]") @map("stops")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@map("planning_drafts")
+}
+
+/// Chat transcript. A skeleton message keeps its own card in payload so later
+/// edits append a new row instead of rewriting history. draftStopId is a key
+/// inside the draft, not a stops.id foreign key.
+model PlanningMessage {
+  id          String               @id @default(uuid()) @db.Uuid
+  tripId      String               @map("trip_id") @db.Uuid
+  position    Int                  @map("position")
+  role        PlanningMessageRole  @map("role")
+  kind        PlanningMessageKind  @map("kind")
+  body        String?              @map("body")
+  draftStopId String?              @map("draft_stop_id")
+  payload     Json?                @map("payload")
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, position])
+  @@index([tripId, createdAt])
+  @@map("planning_messages")
 }

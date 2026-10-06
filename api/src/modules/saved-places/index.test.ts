@@ -9,7 +9,7 @@ describe("createSavedPlaceModule", () => {
     const mod = createSavedPlaceModule({
       user: { upsert: createMockFn() },
       savedPlace: { findMany: createMockFn() },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
     assert.ok(mod.service instanceof SavedPlaceService);
     assert.equal(typeof mod.routes, "function");

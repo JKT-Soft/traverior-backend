@@ -1,27 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { coverImageUrlFromNodes, coverLocationFromTrip, imageUrlFromContent } from "./cover-image.js";
+import { coverImageUrlFromStops, coverLocationFromTrip, imageUrlFromContent } from "./cover-image.js";
 
-describe("coverImageUrlFromNodes", () => {
-  it("prefers stay checkpoint thumbnail over origin", () => {
-    const url = coverImageUrlFromNodes([
+describe("coverImageUrlFromStops", () => {
+  it("prefers stay cover over origin", () => {
+    const url = coverImageUrlFromStops([
       {
-        type: "CHECKPOINT",
-        checkpointKind: "ORIGIN",
-        content: { thumbnailUrl: "https://example.com/jakarta.jpg" },
+        kind: "hub",
+        medias: [{ role: "cover", thumbnailUrl: "https://example.com/jakarta.jpg" }],
       },
       {
-        type: "CHECKPOINT",
-        checkpointKind: "STAY",
-        content: { thumbnailUrl: "https://example.com/singapore.jpg" },
+        kind: "stay",
+        medias: [{ role: "cover", thumbnailUrl: "https://example.com/singapore.jpg" }],
       },
     ]);
     assert.equal(url, "https://example.com/singapore.jpg");
+    assert.equal(imageUrlFromContent(null), null);
   });
 
   it("returns null when no image urls exist", () => {
-    assert.equal(coverImageUrlFromNodes([{ type: "CHECKPOINT", content: { city: "Singapore" } }]), null);
-    assert.equal(imageUrlFromContent(null), null);
+    assert.equal(coverImageUrlFromStops([{ kind: "stay", medias: [] }]), null);
   });
 });
 
@@ -31,7 +29,7 @@ describe("coverLocationFromTrip", () => {
       coverLocationFromTrip({
         title: "liburan ke singapore",
         destinationSummary: "Singapore",
-        nodes: [{ type: "CHECKPOINT", checkpointKind: "STAY", title: "Singapore" }],
+        journey: { stops: [{ kind: "stay", name: "Singapore", city: "Singapore" }] },
       }),
       "Singapore",
     );

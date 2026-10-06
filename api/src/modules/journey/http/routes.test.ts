@@ -11,7 +11,11 @@ function createPrismaMock(): {
     findFirst: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
   };
-  pipelineNode: {
+  journey: {
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
+  stop: {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
     findMany: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
@@ -28,8 +32,12 @@ function createPrismaMock(): {
       findFirst: createMockFn(async () => null),
       update: createMockFn(async () => ({})),
     },
-    pipelineNode: {
-      create: createMockFn(async () => ({})),
+    journey: {
+      create: createMockFn(async () => ({ id: "journey-1", name: "T", stops: [] })),
+      update: createMockFn(async () => ({})),
+    },
+    stop: {
+      create: createMockFn(async () => ({ id: "n1", name: "Note", kind: "activity" })),
       findMany: createMockFn(async () => []),
       update: createMockFn(async () => ({})),
     },
@@ -56,9 +64,8 @@ describe("journey http routes", () => {
             title: "T",
             baseCurrency: "IDR",
           })),
-          update: createMockFn(async () => ({ id: "t1", nodes: [] })),
         },
-        pipelineNode: { create: createMockFn(async () => ({ id: "r1" })) },
+        journey: { create: createMockFn(async () => ({ id: "r1", name: "T", stops: [] })) },
       }),
     );
     const parentId = "00000000-0000-0000-0000-000000000001";
@@ -68,20 +75,14 @@ describe("journey http routes", () => {
       title: "T",
       status: "draft",
       baseCurrency: "IDR",
-      nodes: [
-        {
-          id: parentId,
-          parentId: null,
-          depth: 0,
-          path: "trip",
-          title: "T",
-          type: "JOURNEY",
-          sortOrder: 0,
-        },
-      ],
+      journey: {
+        id: parentId,
+        name: "T",
+        stops: [],
+      },
     }));
-    prismaMock.pipelineNode.findMany = createMockFn(async () => []);
-    prismaMock.pipelineNode.create = createMockFn(async () => ({ id: "n1" }));
+    prismaMock.stop.findMany = createMockFn(async () => []);
+    prismaMock.stop.create = createMockFn(async () => ({ id: "n1", name: "Note", kind: "activity" }));
 
     const { routes } = createJourneyModule({ db: prismaMock as never });
 
@@ -119,6 +120,30 @@ describe("journey http routes", () => {
       },
     });
 
+    await app.close();
+  });
+
+  it("loads planning chat state", async () => {
+    prismaMock.user.upsert = createMockFn(async () => ({ id: "user-1", firebaseUid: "demo" }));
+    prismaMock.trip.findFirst = createMockFn(async () => ({
+      id: "t1",
+      destinationSummary: "Tokyo",
+    }));
+    (prismaMock as { planningDraft?: { findUnique: MockFn<(...args: never[]) => Promise<unknown>> } }).planningDraft = {
+      findUnique: createMockFn(async () => null),
+    };
+    (prismaMock as { planningMessage?: { findMany: MockFn<(...args: never[]) => Promise<unknown>> } }).planningMessage = {
+      findMany: createMockFn(async () => []),
+    };
+
+    const { routes } = createJourneyModule({ db: prismaMock as never });
+    const app = await buildTestApp(routes, { user: { uid: "demo" } });
+    const res = await injectJson(app, "GET", "/t1/planning");
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().data.tripId, "t1");
+    assert.equal(res.json().data.phase, "collecting");
+    assert.equal(res.json().data.canSearch, false);
+    assert.deepEqual(res.json().data.messages, []);
     await app.close();
   });
 });

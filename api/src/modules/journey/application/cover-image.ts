@@ -1,3 +1,24 @@
+type CoverMedia = {
+  imageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  role?: string | null;
+};
+
+type CoverStop = {
+  kind?: string | null;
+  name?: string | null;
+  city?: string | null;
+  medias?: CoverMedia[] | null;
+};
+
+function imageUrlFromMedia(media: CoverMedia | undefined): string | null {
+  if (!media) return null;
+  for (const value of [media.thumbnailUrl, media.imageUrl]) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value)) return value;
+  }
+  return null;
+}
+
 export function imageUrlFromContent(content: unknown): string | null {
   if (!content || typeof content !== "object" || Array.isArray(content)) return null;
   const record = content as Record<string, unknown>;
@@ -8,22 +29,13 @@ export function imageUrlFromContent(content: unknown): string | null {
   return null;
 }
 
-export function coverImageUrlFromNodes(
-  nodes:
-    | Array<{
-        type?: string;
-        checkpointKind?: string | null;
-        content?: unknown;
-      }>
-    | undefined,
-): string | null {
-  if (!nodes?.length) return null;
-  const checkpoints = nodes.filter((node) => node.type === "CHECKPOINT");
-  const stays = checkpoints.filter(
-    (node) => node.checkpointKind === "STAY" || node.checkpointKind == null,
-  );
-  for (const node of stays.length > 0 ? stays : checkpoints) {
-    const url = imageUrlFromContent(node.content);
+export function coverImageUrlFromStops(stops: CoverStop[] | undefined): string | null {
+  if (!stops?.length) return null;
+  const stays = stops.filter((stop) => stop.kind === "stay" || stop.kind == null);
+  const ordered = stays.length > 0 ? stays : stops.filter((stop) => stop.kind !== "travel");
+  for (const stop of ordered.length > 0 ? ordered : stops) {
+    const cover = stop.medias?.find((media) => media.role === "cover") ?? stop.medias?.[0];
+    const url = imageUrlFromMedia(cover);
     if (url) return url;
   }
   return null;
@@ -32,13 +44,11 @@ export function coverImageUrlFromNodes(
 export function coverLocationFromTrip(trip: {
   title: string;
   destinationSummary?: string | null;
-  nodes?: Array<{ type?: string; checkpointKind?: string | null; title?: string }>;
+  journey?: { stops?: CoverStop[] | null } | null;
 }): string | null {
-  const stay = trip.nodes?.find(
-    (node) => node.type === "CHECKPOINT" && (node.checkpointKind === "STAY" || node.checkpointKind == null),
-  );
-  const stayTitle = stay?.title?.trim();
-  if (stayTitle && stayTitle.toLowerCase() !== "destination") return stayTitle;
+  const stay = trip.journey?.stops?.find((stop) => stop.kind === "stay" || stop.kind == null);
+  const stayName = (stay?.city ?? stay?.name)?.trim();
+  if (stayName && stayName.toLowerCase() !== "destination") return stayName;
 
   const summary = trip.destinationSummary?.split(/[•→,|-]/)[0]?.trim();
   if (summary && summary.toLowerCase() !== "primary destination") return summary;

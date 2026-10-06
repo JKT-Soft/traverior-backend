@@ -50,6 +50,8 @@ Return ONE JSON object only (no markdown). Shape:
 {
   "title": string,
   "summary": string,
+  "concept": "culture" | "entertainment" | "business" | "food" | "family",
+  "tone": string,
   "originCity": string | optional,
   "originIata": "CGK" | IATA-3 | optional,
   "destinationSummary": string,
@@ -65,12 +67,15 @@ Return ONE JSON object only (no markdown). Shape:
       "role": "STAY" | "TRANSIT" | "DAY_TRIP",
       "days": number,
       "needs": ["flights"|"hotels"|"places"|"routes"|"weather"|"events"|"visa"|"checklist"],
+      "search": { "events": number, "restaurants": number, "places": number },
       "notes": string | optional
     }
   ]
 }
 
 Rules:
+- Set concept to one primary trip concept. tone is one short sentence about pace/experience (same language as the user).
+- For each STAY, set search.events / search.restaurants / search.places as planned SEARCH COUNTS (not venue names). Scale them to concept and pace. Do not invent hotel or flight counts; the app derives those.
 - Structure a realistic multi-city itinerary from the user prompt + preferences.
 - The checkpoints array must list destination stops only (cities where the traveler stays or does day trips). Do NOT put the home/departure city in checkpoints.
 - originCity is the traveler's departure/home airport city, never a destination.
@@ -128,5 +133,53 @@ export function buildSkeletonUserPrompt(input: PlanSkeletonInput): string {
     JSON.stringify(prefs, null, 2),
     "",
     "Produce the skeleton JSON now.",
+  ].join("\n");
+}
+
+export const REVISE_DRAFT_SYSTEM_PROMPT = `${SKELETON_SYSTEM_PROMPT}
+
+Additional revision rules:
+- You are revising an existing skeleton draft. Change ONLY what the latest user message asks for.
+- Return ONE JSON object:
+{
+  "reply": string,
+  "draftChanged": boolean,
+  "skeleton": <full TripSkeleton shape above> | null,
+  "clarifications": [ same missing[] shape as slot extraction ] | optional
+}
+- Always return the FULL updated skeleton when draftChanged is true. Never return a partial patch.
+- If the user only confirms or chats without changing the plan, set draftChanged=false and skeleton=null.
+- If a required detail is still missing (especially concrete startDate), keep draftChanged=false, skeleton=null, and put questions in clarifications.
+- reply is a short assistant message in the user's language.
+- Do not call or invent provider results, prices, or venue names.`;
+
+export function buildReviseDraftUserPrompt(input: {
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  currentDraft: unknown;
+  latestMessage: string;
+  stopId?: string;
+  preferences?: PlanSkeletonInput["preferences"];
+}): string {
+  const historyBlock =
+    input.history.length === 0
+      ? "(none)"
+      : input.history.map((row) => `${row.role}: ${row.content}`).join("\n");
+
+  return [
+    "Conversation so far (text only; older skeleton cards are omitted on purpose):",
+    historyBlock,
+    "",
+    "Current live draft (source of truth to edit):",
+    JSON.stringify(input.currentDraft, null, 2),
+    "",
+    "Structured preferences:",
+    JSON.stringify(input.preferences ?? {}, null, 2),
+    "",
+    "Latest user message:",
+    input.latestMessage.trim(),
+    "",
+    input.stopId ? `Focused draft stop id: ${input.stopId}` : "Focused draft stop id: (none)",
+    "",
+    "Revise the draft if needed and return the JSON response.",
   ].join("\n");
 }

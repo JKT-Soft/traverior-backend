@@ -2,6 +2,7 @@ export type PipelinePolicyNode = {
   id?: string;
   path?: string;
   type?: string;
+  kind?: string;
   parentId?: string | null;
   origin?: "ai" | "user" | "api" | string;
   isLocked: boolean;
@@ -22,7 +23,7 @@ export class PolicyService {
     if (node.suppressAiRestore) return false;
     if (node.isLocked) return false;
     if (node.isCustom) return false;
-    if (node.parentId === null || node.type === "JOURNEY") return false;
+    if (node.kind === "journey" || node.type === "JOURNEY") return false;
     if (node.origin && node.origin !== "ai") return false;
     return true;
   }
@@ -44,9 +45,10 @@ export class PolicyService {
       if (this.canAiMutate(node)) continue;
       let current: T | undefined = node;
       while (current?.id) {
-        if (current.parentId === null || current.type === "JOURNEY") break;
+        if (current.kind === "journey" || current.type === "JOURNEY") break;
         preservedIds.add(current.id);
-        current = current.parentId ? byId.get(current.parentId) : undefined;
+        if (!current.parentId) break;
+        current = byId.get(current.parentId);
       }
     }
 
@@ -69,7 +71,7 @@ export class PolicyService {
     const parts = path.split("/").filter(Boolean);
     for (let i = parts.length - 1; i > 0; i -= 1) {
       const ancestor = parts.slice(0, i).join("/");
-      if (ancestor === "trip") continue;
+      if (ancestor === "trip" || ancestor === "journey") continue;
       if (preservedPaths.has(ancestor)) return true;
     }
     return false;

@@ -12,7 +12,11 @@ function createPrismaMock(): {
     findFirst: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
   };
-  pipelineNode: {
+  journey: {
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
+  stop: {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
     findMany: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
@@ -29,7 +33,11 @@ function createPrismaMock(): {
       findFirst: createMockFn(async () => null),
       update: createMockFn(async () => ({})),
     },
-    pipelineNode: {
+    journey: {
+      create: createMockFn(async () => ({ id: "journey-1", stops: [] })),
+      update: createMockFn(async () => ({})),
+    },
+    stop: {
       create: createMockFn(async () => ({})),
       findMany: createMockFn(async () => []),
       update: createMockFn(async () => ({})),

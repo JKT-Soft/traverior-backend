@@ -13,6 +13,22 @@ export const NEED_VALUES = [
 
 export const CheckpointNeedSchema = z.enum(NEED_VALUES);
 
+export const PLANNING_CONCEPT_VALUES = [
+  "culture",
+  "entertainment",
+  "business",
+  "food",
+  "family",
+] as const;
+
+export const PlanningConceptSchema = z.enum(PLANNING_CONCEPT_VALUES);
+
+export const CheckpointSearchCountsSchema = z.object({
+  events: z.number().int().min(0).max(20).optional(),
+  restaurants: z.number().int().min(0).max(20).optional(),
+  places: z.number().int().min(0).max(20).optional(),
+});
+
 export const SkeletonCheckpointSchema = z.object({
   city: z.string().min(1),
   countryCode: z.string().min(2).max(2).optional(),
@@ -20,12 +36,15 @@ export const SkeletonCheckpointSchema = z.object({
   role: z.enum(["STAY", "TRANSIT", "DAY_TRIP"]).default("STAY"),
   days: z.number().int().positive().max(30),
   needs: z.array(CheckpointNeedSchema).default([]),
+  search: CheckpointSearchCountsSchema.optional(),
   notes: z.string().optional(),
 });
 
 export const TripSkeletonSchema = z.object({
   title: z.string().min(1),
   summary: z.string().optional(),
+  concept: PlanningConceptSchema.optional(),
+  tone: z.string().optional(),
   originCity: z.string().optional(),
   originIata: z.string().regex(/^[A-Za-z]{3}$/).optional(),
   destinationSummary: z.string().optional(),
@@ -52,6 +71,8 @@ export const PlanPreferencesSchema = z
   .optional();
 
 export type CheckpointNeed = z.infer<typeof CheckpointNeedSchema>;
+export type CheckpointSearchCounts = z.infer<typeof CheckpointSearchCountsSchema>;
+export type PlanningConcept = z.infer<typeof PlanningConceptSchema>;
 export type SkeletonCheckpoint = z.infer<typeof SkeletonCheckpointSchema>;
 export type TripSkeleton = z.infer<typeof TripSkeletonSchema>;
 

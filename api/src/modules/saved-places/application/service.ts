@@ -16,6 +16,8 @@ export type SavePlaceInput = {
   provider?: string | null;
   providerRef?: string | null;
   tripId?: string | null;
+  stopId?: string | null;
+  /** @deprecated Alias of stopId kept for the mobile client. */
   nodeId?: string | null;
   notes?: string | null;
   extra?: Record<string, unknown> | null;
@@ -34,11 +36,12 @@ export type UpdateSavedPlaceInput = {
 
 export type ListSavedPlacesQuery = {
   city?: string;
+  stopId?: string;
   nodeId?: string;
   providerRef?: string;
 };
 
-type SavedPlaceDb = Pick<PrismaClient, "user" | "savedPlace" | "pipelineNode">;
+type SavedPlaceDb = Pick<PrismaClient, "user" | "savedPlace" | "stop">;
 
 function jsonField(value: Record<string, unknown> | null | undefined) {
   if (value === undefined) return undefined;
@@ -57,27 +60,12 @@ function trimToNull(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function stringFromUnknown(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
 function isUniqueViolation(err: unknown) {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 }
 
-function cityFromNode(node: {
-  locationLabel: string | null;
-  content: Prisma.JsonValue | null;
-}): string | undefined {
-  const label = trimToNull(node.locationLabel);
-  if (label) return label;
-  if (node.content && typeof node.content === "object" && !Array.isArray(node.content)) {
-    const content = node.content as Record<string, unknown>;
-    return stringFromUnknown(content.city) ?? stringFromUnknown(content.locality);
-  }
-  return undefined;
+function linkedStopId(input: { stopId?: string | null; nodeId?: string | null }): string | undefined {
+  return input.stopId ?? input.nodeId ?? undefined;
 }
 
 export function serializeSavedPlace(place: SavedPlace) {
@@ -93,7 +81,8 @@ export function serializeSavedPlace(place: SavedPlace) {
     provider: place.provider,
     providerRef: place.providerRef,
     tripId: place.tripId,
-    nodeId: place.nodeId,
+    stopId: place.stopId,
+    nodeId: place.stopId,
     notes: place.notes,
     extra: place.extra,
     createdAt: place.createdAt.toISOString(),
@@ -117,7 +106,7 @@ export class SavedPlaceService {
       where: {
         userId,
         ...(query.city ? { city: query.city } : {}),
-        ...(query.nodeId ? { nodeId: query.nodeId } : {}),
+        ...(query.stopId || query.nodeId ? { stopId: query.stopId ?? query.nodeId } : {}),
         ...(query.providerRef ? { providerRef: query.providerRef } : {}),
       },
       orderBy: { createdAt: "desc" },
@@ -132,7 +121,7 @@ export class SavedPlaceService {
   }
 
   async savePlace(userId: string, input: SavePlaceInput) {
-    const hydrated = input.nodeId ? await this.hydrateFromNode(userId, input) : input;
+    const hydrated = linkedStopId(input) ? await this.hydrateFromStop(userId, input) : input;
     const data = this.toCreateData(userId, hydrated);
 
     const existing = await this.findDuplicate(userId, data);
@@ -178,24 +167,26 @@ export class SavedPlaceService {
     return { deleted: true };
   }
 
-  private async hydrateFromNode(userId: string, input: SavePlaceInput): Promise<SavePlaceInput> {
-    const node = await this.db.pipelineNode.findFirst({
-      where: { id: input.nodeId!, deletedAt: null, trip: { userId } },
+  private async hydrateFromStop(userId: string, input: SavePlaceInput): Promise<SavePlaceInput> {
+    const stopId = linkedStopId(input);
+    const stop = await this.db.stop.findFirst({
+      where: { id: stopId, deletedAt: null, journey: { trip: { userId } } },
+      include: { journey: { select: { tripId: true } } },
     });
-    if (!node) throw new NotFoundError("Place not found");
+    if (!stop) throw new NotFoundError("Place not found");
 
     return {
-      name: input.name?.trim() || node.title,
-      address: input.address !== undefined ? input.address : (node.subtitle ?? node.locationLabel),
-      city: input.city !== undefined ? input.city : cityFromNode(node),
+      name: input.name?.trim() || stop.name,
+      address: input.address !== undefined ? input.address : (stop.subtitle ?? stop.locationLabel),
+      city: input.city !== undefined ? input.city : (trimToNull(stop.city) ?? trimToNull(stop.locationLabel) ?? undefined),
       country: input.country,
-      lat: input.lat !== undefined ? input.lat : node.locationLat,
-      lng: input.lng !== undefined ? input.lng : node.locationLng,
+      lat: input.lat !== undefined ? input.lat : stop.locationLat,
+      lng: input.lng !== undefined ? input.lng : stop.locationLng,
       source: input.source ?? "node",
-      provider: input.provider !== undefined ? input.provider : (node.provider ?? "pipeline"),
-      providerRef: input.providerRef !== undefined ? input.providerRef : (node.providerRef ?? node.id),
-      tripId: input.tripId !== undefined ? input.tripId : node.tripId,
-      nodeId: node.id,
+      provider: input.provider !== undefined ? input.provider : "pipeline",
+      providerRef: input.providerRef !== undefined ? input.providerRef : stop.id,
+      tripId: input.tripId !== undefined ? input.tripId : stop.journey.tripId,
+      stopId: stop.id,
       notes: input.notes,
       extra: input.extra,
     };
@@ -219,11 +210,11 @@ export class SavedPlaceService {
       country: trimToNull(input.country),
       lat,
       lng,
-      source: input.source ?? (input.nodeId ? "node" : input.provider === "google" ? "google" : "user"),
+      source: input.source ?? (linkedStopId(input) ? "node" : input.provider === "google" ? "google" : "user"),
       provider: trimToNull(input.provider),
       providerRef: trimToNull(input.providerRef),
       tripId: input.tripId ?? null,
-      nodeId: input.nodeId ?? null,
+      stopId: linkedStopId(input) ?? null,
       notes: trimToNull(input.notes),
       extra: jsonField(input.extra) ?? undefined,
     };
@@ -234,8 +225,8 @@ export class SavedPlaceService {
     if (data.provider && data.providerRef) {
       where.provider = data.provider;
       where.providerRef = data.providerRef;
-    } else if (data.nodeId) {
-      where.nodeId = data.nodeId;
+    } else if (data.stopId) {
+      where.stopId = data.stopId;
     } else if (data.lat != null && data.lng != null) {
       where.name = data.name;
       where.lat = data.lat;

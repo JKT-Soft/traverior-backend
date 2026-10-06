@@ -15,7 +15,11 @@ function createPrismaMock(): {
     findFirst: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
   };
-  pipelineNode: {
+  journey: {
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
+  stop: {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
     findMany: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
@@ -37,8 +41,12 @@ function createPrismaMock(): {
       findFirst: createMockFn(async () => null),
       update: createMockFn(async () => ({})),
     },
-    pipelineNode: {
-      create: createMockFn(async () => ({})),
+    journey: {
+      create: createMockFn(async () => ({ id: "journey-1", name: "Trip", stops: [] })),
+      update: createMockFn(async () => ({})),
+    },
+    stop: {
+      create: createMockFn(async () => ({ id: "stop-1", name: "Hotel", kind: "activity" })),
       findMany: createMockFn(async () => []),
       update: createMockFn(async () => ({})),
     },
@@ -70,14 +78,9 @@ describe("JourneyService", () => {
             title: "Japan",
             baseCurrency: "IDR",
           })),
-          update: createMockFn(async () => ({
-            id: "trip-1",
-            rootNodeId: "root-1",
-            nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Japan" }],
-          })),
         },
-        pipelineNode: {
-          create: createMockFn(async () => ({ id: "root-1", depth: 0, path: "trip" })),
+        journey: {
+          create: createMockFn(async () => ({ id: "journey-1", name: "Japan", stops: [] })),
         },
       };
       return fn(tx);
@@ -99,20 +102,24 @@ describe("JourneyService", () => {
     prismaMock.trip.findFirst = createMockFn(async () => ({
       id: "trip-1",
       userId: "user-1",
+      title: "Japan",
       baseCurrency: "IDR",
-      nodes: [
-        { id: "root-1", parentId: null, depth: 0, path: "trip", title: "Japan" },
-        { id: "child-1", parentId: "root-1", depth: 1, path: "trip/osaka", title: "Osaka" },
-      ],
+      journey: {
+        id: "root-1",
+        name: "Japan",
+        stops: [
+          { id: "child-1", parentStopId: null, depth: 1, path: "journey/stay_osaka", slug: "stay_osaka", kind: "stay", name: "Osaka" },
+        ],
+      },
     }));
     const trip = await service.getTrip("trip-1", "user-1");
-    assert.equal(trip.nodes.length, 2);
+    assert.equal(trip.journey?.stops.length, 1);
 
-    prismaMock.pipelineNode.findMany = createMockFn(async () => [{ id: "child-1" }]);
+    prismaMock.stop.findMany = createMockFn(async () => [{ id: "child-1", kind: "stay", name: "Osaka" }]);
     assert.equal((await service.listChildren("trip-1", "user-1", "root-1")).length, 1);
     await service.listChildren("trip-1", "user-1", null);
 
-    prismaMock.pipelineNode.create = createMockFn(async () => ({ id: "n2", title: "Hotel" }));
+    prismaMock.stop.create = createMockFn(async () => ({ id: "n2", name: "Hotel", kind: "activity" }));
     const node = await service.addNode({
       tripId: "trip-1",
       userId: "user-1",
@@ -141,7 +148,7 @@ describe("JourneyService", () => {
       ValidationError,
     );
 
-    prismaMock.pipelineNode.create = createMockFn(async () => ({ id: "n3" }));
+    prismaMock.stop.create = createMockFn(async () => ({ id: "n3", name: "x", kind: "activity" }));
     await service.addNode({
       tripId: "trip-1",
       userId: "user-1",
@@ -161,7 +168,11 @@ describe("JourneyService", () => {
         update: async () => ({}),
         create: async () => ({}),
       },
-      pipelineNode: {
+      journey: {
+        create: async () => ({ id: "j1", stops: [] }),
+        update: async () => ({}),
+      },
+      stop: {
         create: async () => ({}),
         findMany: async () => [],
         update: async () => ({}),
@@ -170,9 +181,8 @@ describe("JourneyService", () => {
         fn({
           trip: {
             create: async () => ({ id: "t1", userId: "u1", title: "T", baseCurrency: "IDR" }),
-            update: async () => ({ id: "t1", nodes: [] }),
           },
-          pipelineNode: { create: async () => ({ id: "r1" }) },
+          journey: { create: async () => ({ id: "j1", name: "T", stops: [] }) },
         } as never),
     } as never);
 
@@ -195,15 +205,16 @@ describe("JourneyService", () => {
     const tripRow = {
       id: "trip-1",
       userId: "user-1",
+      title: "Japan",
       baseCurrency: "IDR",
-      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Japan" }],
+      journey: { id: "root-1", name: "Japan", stops: [] as Array<Record<string, unknown>> },
     };
     const db = {
       user: { upsert: async () => ({ id: "user-1" }) },
       trip: {
         findMany: async () => {
           listCalls += 1;
-          return [{ id: "trip-1" }];
+          return [{ id: "trip-1", title: "Japan" }];
         },
         findFirst: async () => {
           getCalls += 1;
@@ -212,8 +223,9 @@ describe("JourneyService", () => {
         create: async () => ({}),
         update: async () => ({}),
       },
-      pipelineNode: {
-        create: async () => ({ id: "n2", title: "Hotel" }),
+      journey: { create: async () => ({ id: "j1", stops: [] }), update: async () => ({}) },
+      stop: {
+        create: async () => ({ id: "n2", name: "Cafe", kind: "activity" }),
         findMany: async () => [],
         update: async () => ({}),
       },
@@ -226,12 +238,8 @@ describe("JourneyService", () => {
               title: "New",
               baseCurrency: "IDR",
             }),
-            update: async () => ({
-              id: "trip-2",
-              nodes: [{ id: "root-2", parentId: null, depth: 0, path: "trip", title: "New" }],
-            }),
           },
-          pipelineNode: { create: async () => ({ id: "root-2" }) },
+          journey: { create: async () => ({ id: "root-2", name: "New", stops: [] }) },
         } as never),
     };
 
@@ -263,9 +271,10 @@ describe("JourneyService", () => {
     assert.equal(listCalls, 2);
   });
 
-  it("planTrip persists AI nodes and rolls up cost", async () => {
-    const created: Array<{ type: string; title: string; path: string }> = [];
+  it("planTrip persists stops, catalog rows, and rolls up cost", async () => {
+    const created: Array<{ kind: string; name: string; path?: string }> = [];
     const planLogUpdates: Array<Record<string, unknown>> = [];
+    const hotels = new Map<string, Record<string, unknown>>();
     const tripRow = {
       id: "trip-1",
       userId: "user-1",
@@ -277,16 +286,11 @@ describe("JourneyService", () => {
       destinationSummary: null,
       startDate: null,
       endDate: null,
-      nodes: [
-        {
-          id: "root-1",
-          parentId: null,
-          depth: 0,
-          path: "trip",
-          type: "JOURNEY",
-          title: "Draft",
-        },
-      ] as Array<Record<string, unknown>>,
+      journey: {
+        id: "journey-1",
+        name: "Draft",
+        stops: [] as Array<Record<string, unknown>>,
+      },
     };
 
     const db = {
@@ -310,26 +314,56 @@ describe("JourneyService", () => {
           return tripRow;
         },
       },
-      pipelineNode: {
-        findMany: async () => [
-          {
-            id: "root-1",
-            parentId: null,
-            type: "JOURNEY",
-            origin: "user",
-            isLocked: false,
-            isCustom: false,
-            suppressAiRestore: false,
-            deletedAt: null,
-          },
-        ],
-        create: async ({ data }: { data: { type: string; title: string; path: string; id?: string } }) => {
-          const row = { id: `n-${created.length + 1}`, ...data };
-          created.push({ type: data.type, title: data.title, path: data.path });
-          tripRow.nodes.push(row);
+      journey: {
+        update: async ({ data }: { data: { name?: string } }) => {
+          tripRow.journey.name = data.name ?? tripRow.journey.name;
+          return tripRow.journey;
+        },
+      },
+      stop: {
+        findMany: async () => [],
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const row = {
+            id: `s-${tripRow.journey.stops.length + 1}`,
+            parentStopId: null,
+            bookings: [] as Array<Record<string, unknown>>,
+            medias: [],
+            notes: [],
+            budgets: [],
+            ...data,
+          };
+          created.push({ kind: String(data.kind), name: String(data.name), path: String(data.path) });
+          tripRow.journey.stops.push(row);
           return row;
         },
         update: async () => ({}),
+      },
+      catalogHotel: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const row = { id: `hotel-${hotels.size + 1}`, ...data };
+          hotels.set(row.id, row);
+          return row;
+        },
+      },
+      booking: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const stop = tripRow.journey.stops.find((item) => item.id === data.stopId);
+          const booking = {
+            id: "booking-hotel",
+            ...data,
+            hotel: data.catalogHotelId ? hotels.get(String(data.catalogHotelId)) : null,
+            flight: null,
+            event: null,
+            place: null,
+            route: null,
+            weather: null,
+            visa: null,
+            checklist: null,
+          };
+          (stop?.bookings as Array<Record<string, unknown>> | undefined)?.push(booking);
+          created.push({ kind: "hotel", name: String((booking.hotel as { name?: string } | null)?.name ?? "") });
+          return booking;
+        },
       },
       applicationLog: {
         create: async () => ({ id: "plan-log-1" }),
@@ -416,8 +450,8 @@ describe("JourneyService", () => {
     assert.equal(result.trip.name, "Japan Adventure");
     assert.ok(result.journey.stops.some((stop) => stop.name === "Osaka"));
     assert.equal(Object.keys(result.catalog.hotels).length, 1);
-    assert.ok(created.some((n) => n.type === "CHECKPOINT" && n.title === "Osaka"));
-    assert.ok(created.some((n) => n.type === "BOOKING" && n.title === "Hotel A"));
+    assert.ok(created.some((n) => n.kind === "stay" && n.name === "Osaka"));
+    assert.ok(created.some((n) => n.kind === "hotel" && n.name === "Hotel A"));
     assert.equal(rolled, true);
     assert.equal(tripRow.status, "ready");
     assert.ok(tripRow.startDate);
@@ -507,7 +541,7 @@ describe("JourneyService", () => {
     assert.equal(planned, false);
   });
 
-  it("planTrip keeps locked nodes and still rolls up cost", async () => {
+  it("planTrip keeps a locked stay and still rolls up cost", async () => {
     const created: string[] = [];
     const deleted: string[] = [];
     const tripRow = {
@@ -521,40 +555,16 @@ describe("JourneyService", () => {
       destinationSummary: "Osaka",
       startDate: null,
       endDate: null,
-      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+      journey: { id: "journey-1", name: "Draft", stops: [] as Array<Record<string, unknown>> },
     };
     const existing = [
       {
-        id: "root-1",
-        parentId: null,
-        path: "trip",
-        type: "JOURNEY",
-        origin: "user",
-        sortOrder: 0,
-        isLocked: false,
-        isCustom: false,
-        suppressAiRestore: false,
-        deletedAt: null,
-      },
-      {
         id: "city-1",
-        parentId: "root-1",
-        path: "trip/osaka",
-        type: "CHECKPOINT",
+        parentStopId: null,
+        path: "journey/stay_osaka",
+        kind: "stay",
         origin: "ai",
-        sortOrder: 0,
-        isLocked: false,
-        isCustom: false,
-        suppressAiRestore: false,
-        deletedAt: null,
-      },
-      {
-        id: "hotel-1",
-        parentId: "city-1",
-        path: "trip/osaka/search_hotels-1",
-        type: "BOOKING",
-        origin: "ai",
-        sortOrder: 0,
+        sortOrder: 2,
         isLocked: true,
         isCustom: false,
         suppressAiRestore: false,
@@ -575,7 +585,8 @@ describe("JourneyService", () => {
           return tripRow;
         },
       },
-      pipelineNode: {
+      journey: { update: async () => tripRow.journey },
+      stop: {
         findMany: async () => existing,
         create: async ({ data }: { data: { path: string } }) => {
           created.push(data.path);
@@ -642,10 +653,8 @@ describe("JourneyService", () => {
       preferences: { startDate: "2026-10-01", endDate: "2026-10-04" },
     });
 
-    assert.equal(deleted.includes("hotel-1"), false);
     assert.equal(deleted.includes("city-1"), false);
-    assert.equal(created.includes("trip/osaka"), false);
-    assert.equal(created.includes("trip/osaka/search_hotels-1"), false);
+    assert.equal(created.includes("journey/stay_osaka"), false);
     assert.equal(rolled, true);
     assert.equal(tripRow.status, "ready");
   });
@@ -737,7 +746,7 @@ describe("JourneyService", () => {
       destinationSummary: null,
       startDate: null as Date | string | null,
       endDate: null as Date | string | null,
-      nodes: [{ id: "root-1", parentId: null, depth: 0, path: "trip", title: "Draft" }],
+      journey: { id: "journey-1", name: "Draft", stops: [] as Array<Record<string, unknown>> },
     };
     const db = {
       user: {
@@ -753,20 +762,14 @@ describe("JourneyService", () => {
           return tripRow;
         },
       },
-      pipelineNode: {
-        findMany: async () => [
-          {
-            id: "root-1",
-            parentId: null,
-            type: "JOURNEY",
-            origin: "user",
-            isLocked: false,
-            isCustom: false,
-            suppressAiRestore: false,
-            deletedAt: null,
-          },
-        ],
-        create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "n-1", ...data }),
+      journey: { update: async () => tripRow.journey },
+      stop: {
+        findMany: async () => [],
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const row = { id: "n-1", bookings: [], medias: [], notes: [], budgets: [], ...data };
+          tripRow.journey.stops.push(row);
+          return row;
+        },
         update: async () => ({}),
       },
       $transaction: async (fn: (tx: never) => unknown) => fn({} as never),

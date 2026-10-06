@@ -18,7 +18,7 @@ const samplePlace = {
   provider: "google",
   providerRef: "ChIJos",
   tripId: null,
-  nodeId: null,
+  stopId: null,
   notes: null,
   extra: null,
   createdAt: new Date("2026-09-04T00:00:00.000Z"),
@@ -34,7 +34,7 @@ function createPrismaMock(): {
     update: MockFn<(...args: never[]) => Promise<unknown>>;
     delete: MockFn<(...args: never[]) => Promise<unknown>>;
   };
-  pipelineNode: { findFirst: MockFn<(...args: never[]) => Promise<unknown>> };
+  stop: { findFirst: MockFn<(...args: never[]) => Promise<unknown>> };
 } {
   return {
     user: {
@@ -47,7 +47,7 @@ function createPrismaMock(): {
       update: createMockFn(async () => samplePlace),
       delete: createMockFn(async () => samplePlace),
     },
-    pipelineNode: {
+    stop: {
       findFirst: createMockFn(async () => null),
     },
   };

@@ -17,10 +17,30 @@ import type { EventService } from "../events/application/service.js";
 import type { VisaService } from "../visa/application/service.js";
 import type { ChecklistService } from "../checklist/application/service.js";
 import { buildToolPlan } from "./infra/need-tools.js";
-import { buildSkeletonUserPrompt, buildSlotExtractUserPrompt, SLOT_EXTRACT_SYSTEM_PROMPT, SKELETON_SYSTEM_PROMPT } from "./infra/prompts.js";
-import { SlotExtractionSchema, type SlotExtraction } from "./domain/extract-slots.js";
+import {
+  buildReviseDraftUserPrompt,
+  buildSkeletonUserPrompt,
+  buildSlotExtractUserPrompt,
+  REVISE_DRAFT_SYSTEM_PROMPT,
+  SLOT_EXTRACT_SYSTEM_PROMPT,
+  SKELETON_SYSTEM_PROMPT,
+} from "./infra/prompts.js";
+import {
+  PlanClarificationSchema,
+  SlotExtractionSchema,
+  type SlotExtraction,
+} from "./domain/extract-slots.js";
+import type { PlanClarification } from "./domain/clarifications.js";
 import type { ApplicationLogService } from "../../shared/logging/application-log.js";
 import { APPLICATION_LOG_TYPE } from "../../shared/logging/application-log-types.js";
+import { z } from "zod";
+
+const ReviseDraftResponseSchema = z.object({
+  reply: z.string().min(1),
+  draftChanged: z.boolean().default(false),
+  skeleton: TripSkeletonSchema.nullable().optional(),
+  clarifications: z.array(PlanClarificationSchema).optional(),
+});
 
 export type PlannerDeps = {
   llm: LlmClient;
@@ -206,6 +226,95 @@ export class PlannerService {
       }),
     );
     return { mcp: this.deps.mcp.name, checkpoints };
+  }
+
+  /**
+   * Chat revision — text history + live draft → reply and optional updated skeleton.
+   * No MCP / provider calls.
+   */
+  async revisePlanningDraft(input: {
+    history: Array<{ role: "user" | "assistant"; content: string }>;
+    currentDraft: unknown;
+    latestMessage: string;
+    stopId?: string;
+    preferences?: PlanSkeletonInput["preferences"];
+    normalizeOptions?: NormalizeSkeletonOptions;
+    logContext?: { tripId?: string; userId?: string };
+  }): Promise<{
+    reply: string;
+    draftChanged: boolean;
+    skeleton: TripSkeleton | null;
+    clarifications: PlanClarification[];
+    llm: string;
+  }> {
+    const latestMessage = input.latestMessage?.trim();
+    if (!latestMessage) throw new ValidationError("latestMessage is required");
+
+    const raw = await this.deps.llm.completeJson({
+      temperature: 0.3,
+      maxTokens: 1600,
+      messages: [
+        { role: "system", content: REVISE_DRAFT_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: buildReviseDraftUserPrompt({
+            history: input.history,
+            currentDraft: input.currentDraft,
+            latestMessage,
+            stopId: input.stopId,
+            preferences: input.preferences,
+          }),
+        },
+      ],
+    });
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripCodeFence(raw));
+    } catch {
+      throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
+    }
+
+    const result = ReviseDraftResponseSchema.safeParse(parsed);
+    if (!result.success) {
+      throw new AppError(
+        502,
+        `LLM revise draft failed validation: ${result.error.issues[0]?.message ?? "invalid"}`,
+        "LLM_INVALID_SKELETON",
+      );
+    }
+
+    const skeleton =
+      result.data.draftChanged && result.data.skeleton
+        ? normalizeTripSkeleton(result.data.skeleton, input.normalizeOptions ?? {})
+        : null;
+
+    await this.deps.logs?.record({
+      type: APPLICATION_LOG_TYPE.PLAN_SKELETON,
+      source: "planner.revisePlanningDraft",
+      message: "Planning draft revised",
+      tripId: input.logContext?.tripId,
+      userId: input.logContext?.userId,
+      payload: {
+        latestMessage,
+        stopId: input.stopId,
+        draftChanged: result.data.draftChanged,
+        llmProvider: this.deps.llm.name,
+      },
+      result: {
+        reply: result.data.reply,
+        skeleton,
+        clarifications: result.data.clarifications ?? [],
+      },
+    });
+
+    return {
+      reply: result.data.reply,
+      draftChanged: Boolean(skeleton),
+      skeleton,
+      clarifications: result.data.clarifications ?? [],
+      llm: this.deps.llm.name,
+    };
   }
 
   /** Convenience: skeleton from prompt then execute MCP tools. */

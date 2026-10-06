@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { serializePlanResponse } from "./serialize-plan-response.js";
 
 describe("serializePlanResponse", () => {
-  it("converts flat nodes into stops and typed catalogs", () => {
+  it("serializes stops and typed catalog rows", () => {
     const response = serializePlanResponse({
       llm: "mock-llm",
       mcp: "inprocess",
@@ -18,68 +18,60 @@ describe("serializePlanResponse", () => {
         endDate: new Date("2026-10-05"),
         baseCurrency: "IDR",
         totalCostAmount: 500,
-        nodes: [
-          {
-            id: "root",
-            parentId: null,
-            sortOrder: 0,
-            type: "JOURNEY",
-            title: "Japan Journey",
-          },
-          {
-            id: "origin",
-            parentId: "root",
-            sortOrder: 1,
-            type: "CHECKPOINT",
-            checkpointKind: "ORIGIN",
-            title: "Jakarta",
-            contentType: "checkpoint",
-            content: { city: "Jakarta" },
-          },
-          {
-            id: "outbound",
-            parentId: "root",
-            sortOrder: 2,
-            type: "LEG",
-            title: "Flight to Tokyo",
-            contentType: "leg",
-          },
-          {
-            id: "tokyo",
-            parentId: "root",
-            sortOrder: 3,
-            type: "CHECKPOINT",
-            checkpointKind: "STAY",
-            title: "Tokyo",
-            contentType: "checkpoint",
-            content: {
+        journey: {
+          id: "journey-1",
+          name: "Japan Journey",
+          stops: [
+            {
+              id: "origin",
+              sortOrder: 1,
+              kind: "hub",
+              hubRole: "origin",
+              slug: "hub_origin",
+              name: "Jakarta",
+              city: "Jakarta",
+              scheduleStart: new Date("2026-10-01"),
+            },
+            {
+              id: "outbound",
+              sortOrder: 2,
+              kind: "travel",
+              slug: "travel_outbound",
+              name: "Flight to Tokyo",
+              bookings: [
+                {
+                  id: "flight-booking",
+                  kind: "flight",
+                  costAmount: 500,
+                  costCurrency: "IDR",
+                  flight: {
+                    id: "flight-row",
+                    name: "Airline 123",
+                    raw: { origin: "CGK", destination: "NRT" },
+                  },
+                },
+              ],
+            },
+            {
+              id: "tokyo",
+              sortOrder: 3,
+              kind: "stay",
+              slug: "stay_tokyo",
+              name: "Tokyo",
               city: "Tokyo",
               days: 4,
-              startDate: "2026-10-01",
-              endDate: "2026-10-05",
+              dateStart: "2026-10-01",
+              dateEnd: "2026-10-05",
+              bookings: [
+                {
+                  id: "hotel-booking",
+                  kind: "hotel",
+                  hotel: { id: "hotel-row", name: "Tokyo Hotel", raw: { name: "Tokyo Hotel" } },
+                },
+              ],
             },
-          },
-          {
-            id: "flight-node",
-            parentId: "tokyo",
-            sortOrder: 1,
-            type: "BOOKING",
-            title: "Airline 123",
-            contentType: "flight",
-            content: { origin: "CGK", destination: "NRT" },
-            costAmount: 500,
-            costCurrency: "IDR",
-          },
-          {
-            id: "hotel-node",
-            parentId: "tokyo",
-            sortOrder: 2,
-            type: "BOOKING",
-            title: "Tokyo Hotel",
-            contentType: "hotel",
-            content: { name: "Tokyo Hotel" },
-          },
-        ],
+          ],
+        },
       },
     });
 

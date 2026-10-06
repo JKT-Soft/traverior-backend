@@ -1,24 +1,69 @@
 import { moneyToNumber } from "./serialize-trip.js";
 
-type PlanNode = {
+type CatalogRow = {
   id: string;
-  parentId?: string | null;
-  sortOrder?: number;
-  type: string;
-  checkpointKind?: string | null;
-  title: string;
-  subtitle?: string | null;
-  contentType?: string | null;
-  content?: unknown;
-  scheduleStart?: unknown;
-  scheduleEnd?: unknown;
-  costAmount?: unknown;
-  costCurrency?: string;
-  costIsEstimate?: boolean;
-  userNotes?: string | null;
+  raw?: unknown;
+  name?: string | null;
+  title?: string | null;
+  provider?: string | null;
+  kind?: string | null;
+  places?: unknown;
+  daily?: unknown;
+  alerts?: unknown;
+  summary?: string | null;
+  items?: unknown;
+  mode?: string | null;
+  durationMinutes?: number | null;
+  distanceMeters?: number | null;
 };
 
-type PlanTrip = {
+type StoredBooking = {
+  id: string;
+  kind: string;
+  role?: string | null;
+  sortOrder?: number;
+  costAmount?: unknown;
+  costCurrency?: string | null;
+  costIsEstimate?: boolean;
+  deepLinkUrl?: string | null;
+  flight?: CatalogRow | null;
+  hotel?: CatalogRow | null;
+  event?: CatalogRow | null;
+  place?: CatalogRow | null;
+  route?: CatalogRow | null;
+  weather?: CatalogRow | null;
+  visa?: CatalogRow | null;
+  checklist?: CatalogRow | null;
+};
+
+type StoredStop = {
+  id: string;
+  parentStopId?: string | null;
+  sortOrder?: number;
+  kind: string;
+  hubRole?: string | null;
+  slug: string;
+  name: string;
+  subtitle?: string | null;
+  days?: number | null;
+  countryCode?: string | null;
+  city?: string | null;
+  scheduleStart?: unknown;
+  scheduleEnd?: unknown;
+  dateStart?: unknown;
+  dateEnd?: unknown;
+  bookings?: StoredBooking[];
+  medias?: Array<{
+    imageUrl?: string | null;
+    thumbnailUrl?: string | null;
+    attribution?: unknown;
+    role?: string | null;
+  }>;
+  notes?: Array<{ body?: string | null; title?: string | null }>;
+  budgets?: Array<{ category?: string | null; amount?: unknown; currency?: string | null; isEstimate?: boolean }>;
+};
+
+type StoredTrip = {
   id: string;
   userId?: string;
   title: string;
@@ -35,7 +80,11 @@ type PlanTrip = {
   coverImageUrl?: string | null;
   planningVersion?: number;
   lastPlannedAt?: unknown;
-  nodes: PlanNode[];
+  journey?: {
+    id?: string | null;
+    name?: string | null;
+    stops?: StoredStop[];
+  } | null;
 };
 
 type Catalog = {
@@ -45,6 +94,8 @@ type Catalog = {
   places: Record<string, Record<string, unknown>>;
   routes: Record<string, Record<string, unknown>>;
   weather: Record<string, Record<string, unknown>>;
+  visas: Record<string, Record<string, unknown>>;
+  checklists: Record<string, Record<string, unknown>>;
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -54,7 +105,13 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function dateValue(value: unknown): unknown {
-  return value instanceof Date ? value.toISOString() : value ?? null;
+  if (value instanceof Date) return value.toISOString();
+  return value ?? null;
+}
+
+function dayValue(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return value ?? null;
 }
 
 function slug(value: string): string {
@@ -67,58 +124,57 @@ function slug(value: string): string {
   );
 }
 
-function budget(node: PlanNode, fallbackCurrency: string) {
+function budgetFrom(amount: unknown, currency: string | null | undefined, isEstimate: boolean | undefined, fallback: string) {
   return {
-    amount: moneyToNumber(node.costAmount),
-    currency: node.costCurrency ?? fallbackCurrency,
-    isEstimate: node.costIsEstimate ?? true,
+    amount: moneyToNumber(amount),
+    currency: currency ?? fallback,
+    isEstimate: isEstimate ?? true,
   };
 }
 
-function media(content: Record<string, unknown>) {
-  return {
-    imageUrl: content.imageUrl ?? null,
-    thumbnailUrl: content.thumbnailUrl ?? null,
-    imageAttribution: content.imageAttribution ?? null,
-  };
+function catalogPayload(row: CatalogRow | null | undefined): Record<string, unknown> {
+  if (!row) return {};
+  const raw = record(row.raw);
+  const rest: Record<string, unknown> = { ...row };
+  delete rest.raw;
+  return { ...raw, ...rest };
 }
 
-function catalogEntry(
-  id: string,
-  node: PlanNode,
-  content: Record<string, unknown>,
-  fallbackCurrency: string,
-): Record<string, unknown> {
-  return {
-    ...content,
-    id,
-    nodeId: node.id,
-    title: node.title,
-    cost: budget(node, fallbackCurrency),
-  };
+function rowFor(booking: StoredBooking): CatalogRow | null {
+  switch (booking.kind) {
+    case "flight":
+      return booking.flight ?? null;
+    case "hotel":
+      return booking.hotel ?? null;
+    case "event":
+      return booking.event ?? null;
+    case "place":
+      return booking.place ?? null;
+    case "route":
+      return booking.route ?? null;
+    case "weather":
+      return booking.weather ?? null;
+    case "visa":
+      return booking.visa ?? null;
+    case "checklist":
+      return booking.checklist ?? null;
+    default:
+      return null;
+  }
 }
 
 export function serializePlanResponse(input: {
-  trip: PlanTrip;
+  trip: StoredTrip;
   llm?: string;
   mcp?: string;
   clarifications?: unknown[];
 }) {
   const { trip } = input;
   const currency = trip.baseCurrency ?? "IDR";
-  const root = trip.nodes.find((node) => node.parentId == null && node.type === "JOURNEY");
-  const rootChildren = root
-    ? trip.nodes
-        .filter((node) => node.parentId === root.id)
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    : [];
-  const childrenByParent = new Map<string, PlanNode[]>();
-  for (const node of trip.nodes) {
-    if (!node.parentId) continue;
-    const children = childrenByParent.get(node.parentId) ?? [];
-    children.push(node);
-    childrenByParent.set(node.parentId, children);
-  }
+  const journey = trip.journey;
+  const sourceStops = [...(journey?.stops ?? [])]
+    .filter((stop) => stop.parentStopId == null)
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
   const catalog: Catalog = {
     flights: {},
@@ -127,166 +183,119 @@ export function serializePlanResponse(input: {
     places: {},
     routes: {},
     weather: {},
+    visas: {},
+    checklists: {},
   };
-  const stops: Array<Record<string, unknown>> = [];
   let flightNo = 0;
   let hotelNo = 0;
   let eventNo = 0;
   let placeNo = 0;
   let routeNo = 0;
   let weatherNo = 0;
+  let visaNo = 0;
+  let checklistNo = 0;
 
-  for (const node of rootChildren) {
-    const content = record(node.content);
-    const city = String(content.city ?? node.title);
+  const stops = sourceStops.map((stop) => {
+    const city = stop.city ?? stop.name;
     const citySlug = slug(city);
-    const role = node.checkpointKind?.toLowerCase();
-
-    if (node.type === "LEG" && node.contentType === "leg") {
-      stops.push({
-        id: /return/i.test(node.title) ? "travel_return" : `travel_${stops.length + 1}`,
-        kind: "travel",
-        name: node.title,
-        subtitle: node.subtitle ?? null,
-        nodeId: node.id,
-        schedule: {
-          start: dateValue(node.scheduleStart),
-          end: dateValue(node.scheduleEnd),
-        },
-        bookings: { flightIds: [], hotelIds: [], eventIds: [] },
-        maps: { href: `/v1/trips/${trip.id}/nodes?parentId=${node.id}` },
-        budget: budget(node, currency),
-        notes: node.userNotes ? [node.userNotes] : [],
-      });
-      continue;
-    }
-
-    if (node.type !== "CHECKPOINT") continue;
-
-    if (node.checkpointKind === "ORIGIN" || node.checkpointKind === "RETURN") {
-      const hubRole = node.checkpointKind.toLowerCase();
-      stops.push({
-        id: `hub_${hubRole}`,
-        kind: "hub",
-        role: hubRole,
-        name: city,
-        nodeId: node.id,
-        schedule: { at: dateValue(node.scheduleStart) },
-        media: media(content),
-        bookings: { flightIds: [], hotelIds: [], eventIds: [] },
-        maps: { href: `/v1/trips/${trip.id}/nodes?parentId=${node.id}` },
-        budget: budget(node, currency),
-        notes: node.userNotes ? [node.userNotes] : [],
-      });
-      continue;
-    }
-
     const flightIds: string[] = [];
     const hotelIds: string[] = [];
     const eventIds: string[] = [];
     const placeIds: string[] = [];
     const routeIds: string[] = [];
     const weatherIds: string[] = [];
-    const children = (childrenByParent.get(node.id) ?? []).sort(
-      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
-    );
+    const bookings = [...(stop.bookings ?? [])].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
-    for (const child of children) {
-      const childContent = record(child.content);
-      if (child.contentType === "flight") {
+    for (const booking of bookings) {
+      const row = rowFor(booking);
+      const content = catalogPayload(row);
+      const cost = budgetFrom(booking.costAmount, booking.costCurrency, booking.costIsEstimate, currency);
+      if (booking.kind === "flight") {
         const id = `flt_${citySlug}_${++flightNo}`;
-        catalog.flights[id] = catalogEntry(id, child, childContent, currency);
+        catalog.flights[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Flight"), cost };
         flightIds.push(id);
-      } else if (child.contentType === "hotel") {
+      } else if (booking.kind === "hotel") {
         const id = `htl_${citySlug}_${++hotelNo}`;
-        catalog.hotels[id] = catalogEntry(id, child, childContent, currency);
+        catalog.hotels[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Hotel"), cost };
         hotelIds.push(id);
-      } else if (child.contentType === "event") {
+      } else if (booking.kind === "event") {
         const id = `evt_${citySlug}_${++eventNo}`;
-        catalog.events[id] = catalogEntry(id, child, childContent, currency);
+        catalog.events[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Event"), cost };
         eventIds.push(id);
-      } else if (
-        child.contentType === "places.restaurants" ||
-        child.contentType === "places.pois"
-      ) {
-        const kind =
-          child.contentType === "places.restaurants" ? "restaurants" : "pois";
+      } else if (booking.kind === "place") {
+        const kind = row?.kind === "restaurants" ? "restaurants" : "pois";
         const id = `plc_${kind}_${citySlug}_${++placeNo}`;
-        catalog.places[id] = {
-          ...catalogEntry(id, child, childContent, currency),
-          kind,
-        };
+        catalog.places[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, kind), kind, cost };
         placeIds.push(id);
-      } else if (child.contentType === "route") {
+      } else if (booking.kind === "route") {
         const id = `rte_${citySlug}_${++routeNo}`;
-        const route = record(childContent.route);
-        catalog.routes[id] = catalogEntry(
-          id,
-          child,
-          { ...route, provider: route.provider ?? childContent.provider },
-          currency,
-        );
+        catalog.routes[id] = { ...content, id, nodeId: booking.id, title: "Route", cost };
         routeIds.push(id);
-      } else if (child.contentType === "weather.forecast") {
+      } else if (booking.kind === "weather") {
         const id = `wx_${citySlug}_${++weatherNo}`;
-        const forecast = record(childContent.forecast);
-        catalog.weather[id] = catalogEntry(
-          id,
-          child,
-          { ...forecast, provider: forecast.provider ?? childContent.provider },
-          currency,
-        );
+        catalog.weather[id] = { ...content, id, nodeId: booking.id, title: "Weather", cost };
         weatherIds.push(id);
+      } else if (booking.kind === "visa") {
+        const id = `visa_${citySlug}_${++visaNo}`;
+        catalog.visas[id] = { ...content, id, nodeId: booking.id, title: "Visa", cost };
+      } else if (booking.kind === "checklist") {
+        const id = `chk_${citySlug}_${++checklistNo}`;
+        catalog.checklists[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Travel checklist"), cost };
       }
     }
 
-    stops.push({
-      id: `${role ?? "checkpoint"}_${citySlug}`,
-      kind: role ?? "checkpoint",
-      name: city,
-      nodeId: node.id,
-      days: content.days ?? null,
-      dates: {
-        start: content.startDate ?? dateValue(node.scheduleStart),
-        end: content.endDate ?? dateValue(node.scheduleEnd),
-      },
-      countryCode: content.countryCode ?? null,
-      media: media(content),
+    const totalBudget = (stop.budgets ?? []).find((item) => item.category === "total") ?? stop.budgets?.[0];
+    const bookingAmount = bookings.reduce((sum, booking) => sum + moneyToNumber(booking.costAmount), 0);
+    const cover = (stop.medias ?? []).find((media) => media.role === "cover") ?? stop.medias?.[0];
+    const noteBodies = (stop.notes ?? [])
+      .map((note) => note.body)
+      .filter((body): body is string => typeof body === "string" && body.length > 0);
+
+    const view: Record<string, unknown> = {
+      id: stop.slug,
+      kind: stop.kind,
+      name: stop.name,
+      subtitle: stop.subtitle ?? null,
+      nodeId: stop.id,
       bookings: { flightIds, hotelIds, eventIds },
       maps: {
-        href: `/v1/trips/${trip.id}/nodes?parentId=${node.id}`,
+        href: `/v1/trips/${trip.id}/nodes?parentId=${stop.id}`,
         routeIds,
         placeIds,
         weatherIds,
       },
-      budget: budget(node, currency),
-      notes: [
-        ...(typeof content.notes === "string" ? [content.notes] : []),
-        ...(node.userNotes ? [node.userNotes] : []),
-      ],
-    });
-  }
-
-  // Flight entities live under destination checkpoints in storage. Also reference
-  // them from adjacent travel stops so the response reads as an itinerary.
-  for (let index = 0; index < stops.length; index++) {
-    const stop = stops[index]!;
-    if (stop.kind !== "travel") continue;
-    const adjacentStops = /return/i.test(String(stop.name))
-      ? stops.slice(0, index).reverse()
-      : stops.slice(index + 1);
-    const adjacent = adjacentStops.find(
-      (candidate) =>
-        candidate.kind !== "hub" &&
-        record(candidate.bookings).flightIds instanceof Array &&
-        (record(candidate.bookings).flightIds as unknown[]).length > 0,
-    );
-    if (adjacent) {
-      record(stop.bookings).flightIds = [
-        ...((record(adjacent.bookings).flightIds as string[]) ?? []),
-      ];
+      budget: totalBudget
+        ? budgetFrom(totalBudget.amount, totalBudget.currency, totalBudget.isEstimate, currency)
+        : budgetFrom(bookingAmount, currency, true, currency),
+      notes: noteBodies,
+    };
+    if (stop.hubRole) view.role = stop.hubRole;
+    if (stop.kind === "hub") {
+      view.schedule = { at: dateValue(stop.scheduleStart) };
+    } else if (stop.kind === "travel") {
+      view.schedule = {
+        start: dateValue(stop.scheduleStart),
+        end: dateValue(stop.scheduleEnd),
+      };
+    } else {
+      view.days = stop.days ?? null;
+      view.dates = {
+        start: dayValue(stop.dateStart) ?? dateValue(stop.scheduleStart),
+        end: dayValue(stop.dateEnd) ?? dateValue(stop.scheduleEnd),
+      };
+      view.countryCode = stop.countryCode ?? null;
     }
-  }
+    if (cover?.imageUrl || cover?.thumbnailUrl) {
+      view.media = {
+        imageUrl: cover.imageUrl ?? null,
+        thumbnailUrl: cover.thumbnailUrl ?? null,
+        imageAttribution: cover.attribution ?? null,
+      };
+    }
+    return view;
+  });
+
+  shareFlightIds(stops);
 
   return {
     trip: {
@@ -313,8 +322,8 @@ export function serializePlanResponse(input: {
       lastPlannedAt: dateValue(trip.lastPlannedAt),
     },
     journey: {
-      id: root?.id ?? null,
-      name: root?.title ?? trip.title,
+      id: journey?.id ?? null,
+      name: journey?.name ?? trip.title,
       stops,
     },
     catalog,
@@ -325,4 +334,44 @@ export function serializePlanResponse(input: {
       schema: "trip+journey.stops+catalog",
     },
   };
+}
+
+function textTitle(row: CatalogRow | null, fallback: string): string {
+  if (!row) return fallback;
+  if (typeof row.name === "string" && row.name.length > 0) return row.name;
+  if (typeof row.title === "string" && row.title.length > 0) return row.title;
+  const raw = record(row.raw);
+  if (typeof raw.name === "string") return raw.name;
+  if (typeof raw.title === "string") return raw.title;
+  if (typeof raw.carrier === "string") return raw.carrier;
+  return fallback;
+}
+
+function flightIdsOf(stop: Record<string, unknown>): string[] {
+  const value = record(stop.bookings).flightIds;
+  return Array.isArray(value) ? (value as string[]) : [];
+}
+
+function shareFlightIds(stops: Array<Record<string, unknown>>) {
+  for (const stop of stops) {
+    if (stop.kind !== "stay" && stop.kind !== "transit") continue;
+    if (flightIdsOf(stop).length > 0) continue;
+    const index = stops.indexOf(stop);
+    const travel =
+      [...stops.slice(0, index)].reverse().find((item) => item.kind === "travel" && flightIdsOf(item).length > 0) ??
+      stops.slice(index + 1).find((item) => item.kind === "travel" && flightIdsOf(item).length > 0);
+    if (travel) record(stop.bookings).flightIds = [...flightIdsOf(travel)];
+  }
+
+  for (let index = 0; index < stops.length; index++) {
+    const stop = stops[index]!;
+    if (stop.kind !== "travel" || flightIdsOf(stop).length > 0) continue;
+    const pool = /return/i.test(String(stop.name))
+      ? [...stops.slice(0, index)].reverse()
+      : stops.slice(index + 1);
+    const stay = pool.find(
+      (item) => (item.kind === "stay" || item.kind === "transit") && flightIdsOf(item).length > 0,
+    );
+    if (stay) record(stop.bookings).flightIds = [...flightIdsOf(stay)];
+  }
 }

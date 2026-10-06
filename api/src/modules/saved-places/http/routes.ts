@@ -24,12 +24,13 @@ const savePlaceSchema = z
     provider: z.string().trim().max(80).nullable().optional(),
     providerRef: z.string().trim().max(200).nullable().optional(),
     tripId: uuid.nullable().optional(),
+    stopId: uuid.nullable().optional(),
     nodeId: uuid.nullable().optional(),
     notes: z.string().trim().max(2000).nullable().optional(),
     extra: z.record(z.unknown()).nullable().optional(),
   })
-  .refine((body) => Boolean(body.name?.trim()) || Boolean(body.nodeId), {
-    message: "Name or nodeId is required",
+  .refine((body) => Boolean(body.name?.trim()) || Boolean(body.stopId) || Boolean(body.nodeId), {
+    message: "Name or stopId is required",
   });
 
 const updatePlaceSchema = z
@@ -58,6 +59,7 @@ const updatePlaceSchema = z
 
 const listQuerySchema = z.object({
   city: z.string().trim().min(1).optional(),
+  stopId: uuid.optional(),
   nodeId: uuid.optional(),
   providerRef: z.string().trim().min(1).optional(),
 });

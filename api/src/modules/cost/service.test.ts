@@ -5,12 +5,16 @@ import { CostService } from "./service.js";
 
 function createPrismaMock() {
   return {
-    pipelineNode: {
+    stop: {
       findMany: createMockFn(async () => []) as MockFn<(...args: never[]) => Promise<unknown>>,
-      update: createMockFn(async () => ({})) as MockFn<(...args: never[]) => Promise<unknown>>,
     },
     trip: {
+      findUnique: createMockFn(async () => ({ baseCurrency: "IDR" })) as MockFn<(...args: never[]) => Promise<unknown>>,
       update: createMockFn(async () => ({})) as MockFn<(...args: never[]) => Promise<unknown>>,
+    },
+    budget: {
+      deleteMany: createMockFn(async () => ({ count: 0 })) as MockFn<(...args: never[]) => Promise<unknown>>,
+      create: createMockFn(async () => ({})) as MockFn<(...args: never[]) => Promise<unknown>>,
     },
   };
 }
@@ -22,35 +26,54 @@ beforeEach(() => {
 });
 
 describe("CostService", () => {
-  it("sums own + child cost/duration up to the trip", async () => {
-    const nodes = [
-      { id: "root", parentId: null, costAmount: 0, durationMinutes: 0, depth: 0 },
-      { id: "a", parentId: "root", costAmount: 3, durationMinutes: 10, depth: 1 },
-      { id: "a1", parentId: "a", costAmount: 10, durationMinutes: 5, depth: 2 },
-      { id: "a2", parentId: "a", costAmount: 5, durationMinutes: 2, depth: 2 },
+  it("rolls booking cost and nested duration up to the trip", async () => {
+    const stops = [
+      {
+        id: "root",
+        parentStopId: null,
+        depth: 0,
+        days: 0,
+        bookings: [{ kind: "hotel", costAmount: 3, flight: null }],
+      },
+      {
+        id: "a",
+        parentStopId: "root",
+        depth: 1,
+        days: 0,
+        bookings: [{ kind: "flight", costAmount: 10, flight: { durationMinutes: 5 } }],
+      },
+      {
+        id: "b",
+        parentStopId: "root",
+        depth: 1,
+        days: 0,
+        bookings: [{ kind: "event", costAmount: 5, flight: { durationMinutes: 2 } }],
+      },
     ];
-    prismaMock.pipelineNode.findMany = createMockFn(async () => nodes);
-    const updates: Array<{ id: string; costAmount: number; durationMinutes: number }> = [];
-    prismaMock.pipelineNode.update = createMockFn(async (args: { where: { id: string }; data: { costAmount: number; durationMinutes: number } }) => {
-      updates.push({ id: args.where.id, costAmount: args.data.costAmount, durationMinutes: args.data.durationMinutes });
+    prismaMock.stop.findMany = createMockFn(async () => stops);
+    const budgets: Array<{ id?: string; amount: number }> = [];
+    prismaMock.budget.create = createMockFn(async (args: { data: { stopId?: string; tripId?: string; amount: number } }) => {
+      budgets.push({ id: args.data.stopId ?? args.data.tripId, amount: args.data.amount });
       return {};
     }) as never;
-    prismaMock.trip.update = createMockFn(async () => ({}));
 
     const result = await new CostService(prismaMock as never).rollupTrip("trip-1");
 
-    const byId = Object.fromEntries(updates.map((row) => [row.id, row]));
-    assert.equal(byId.a?.costAmount, 18);
-    assert.equal(byId.a?.durationMinutes, 17);
-    assert.equal(byId.root?.costAmount, 18);
-    assert.equal(byId.root?.durationMinutes, 17);
+    const byId = Object.fromEntries(budgets.map((row) => [row.id, row]));
+    assert.equal(byId.a?.amount, 10);
+    assert.equal(byId.b?.amount, 5);
+    assert.equal(byId.root?.amount, 18);
+    assert.equal(byId["trip-1"]?.amount, 18);
     assert.equal(result.totalCostAmount, 18);
-    assert.equal(result.totalDurationMinutes, 17);
-    assert.equal((prismaMock.trip.update.mock.calls[0]?.[0] as { data: { totalCostAmount: number } }).data.totalCostAmount, 18);
+    assert.equal(result.totalDurationMinutes, 7);
+    assert.equal(
+      (prismaMock.trip.update.mock.calls[0]?.[0] as { data: { totalCostAmount: number } }).data.totalCostAmount,
+      18,
+    );
   });
 
-  it("returns zeros when the trip has no nodes", async () => {
-    prismaMock.pipelineNode.findMany = createMockFn(async () => []);
+  it("returns zeros when the trip has no stops", async () => {
+    prismaMock.stop.findMany = createMockFn(async () => []);
     const result = await new CostService(prismaMock as never).rollupTrip("empty");
     assert.deepEqual(result, { totalCostAmount: 0, totalDurationMinutes: 0 });
     assert.equal(prismaMock.trip.update.mock.calls.length, 0);

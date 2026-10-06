@@ -3,6 +3,8 @@ import type { PlanSkeletonInput } from "../../planner/domain/skeleton.js";
 export type StoredTravelPreference = {
   budgetStyle?: "budget" | "balanced" | "luxury";
   pace?: "relaxed" | "moderate" | "packed";
+  homeCity?: string | null;
+  passportCountry?: string | null;
   extra?: unknown;
 };
 
@@ -32,8 +34,9 @@ export function mergePlanPreferences(input: {
   request?: PlanSkeletonInput["preferences"];
   tripOriginCity?: string | null;
 }): NonNullable<PlanSkeletonInput["preferences"]> {
-  const storedOrigin = extraString(input.stored?.extra, "originCity");
-  const storedPassport = extraString(input.stored?.extra, "passportCountry");
+  const storedOrigin = input.stored?.homeCity?.trim() || extraString(input.stored?.extra, "originCity");
+  const storedPassport =
+    input.stored?.passportCountry?.trim() || extraString(input.stored?.extra, "passportCountry");
   const request = input.request ?? {};
   const tripOrigin = input.tripOriginCity?.trim() || undefined;
 

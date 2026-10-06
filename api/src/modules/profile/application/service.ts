@@ -10,6 +10,8 @@ export type ProfilePreferencesInput = {
   interests?: string[];
   travelWith?: "solo" | "couple" | "family" | "friends" | null;
   avoid?: string[];
+  homeCity?: string | null;
+  passportCountry?: string | null;
   extra?: Record<string, unknown> | null;
 };
 
@@ -38,6 +40,8 @@ export type ProfileRecord = {
     interests: string[];
     travelWith: "solo" | "couple" | "family" | "friends" | null;
     avoid: string[];
+    homeCity?: string | null;
+    passportCountry?: string | null;
     extra: Prisma.JsonValue | null;
     updatedAt: Date;
   } | null;
@@ -75,6 +79,8 @@ export function serializeProfile(user: ProfileRecord) {
           interests: user.preference.interests,
           travelWith: user.preference.travelWith,
           avoid: user.preference.avoid,
+          homeCity: user.preference.homeCity ?? null,
+          passportCountry: user.preference.passportCountry ?? null,
           extra: user.preference.extra,
           updatedAt: user.preference.updatedAt.toISOString(),
         }
@@ -122,6 +128,8 @@ export class ProfileService {
       if (prefs.interests !== undefined) preferenceData.interests = prefs.interests;
       if (prefs.travelWith !== undefined) preferenceData.travelWith = prefs.travelWith;
       if (prefs.avoid !== undefined) preferenceData.avoid = prefs.avoid;
+      if (prefs.homeCity !== undefined) preferenceData.homeCity = prefs.homeCity;
+      if (prefs.passportCountry !== undefined) preferenceData.passportCountry = prefs.passportCountry;
       if (prefs.extra !== undefined) preferenceData.extra = jsonField(prefs.extra);
 
       if (Object.keys(preferenceData).length > 0) {
@@ -135,6 +143,8 @@ export class ProfileService {
               avoid: prefs.avoid ?? [],
               ...(prefs.budgetMax !== undefined ? { budgetMax: prefs.budgetMax } : {}),
               ...(prefs.travelWith !== undefined ? { travelWith: prefs.travelWith } : {}),
+              ...(prefs.homeCity !== undefined ? { homeCity: prefs.homeCity } : {}),
+              ...(prefs.passportCountry !== undefined ? { passportCountry: prefs.passportCountry } : {}),
               ...(prefs.extra !== undefined ? { extra: jsonField(prefs.extra) } : {}),
             },
             update: preferenceData,

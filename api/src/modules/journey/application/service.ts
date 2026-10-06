@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient, StopKind } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../../infra/prisma/client.js";
 import type { CacheStore } from "../../../shared/cache/index.js";
 import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
@@ -15,13 +15,14 @@ import type { CostService } from "../../cost/service.js";
 import type { ImageService } from "../../images/index.js";
 import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
-import type { PlanSkeletonInput } from "../../planner/domain/skeleton.js";
+import type { PlanSkeletonInput, TripSkeleton } from "../../planner/domain/skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
-import { coverImageUrlFromNodes, coverLocationFromTrip } from "./cover-image.js";
-import { serializeTrip, serializeTripNode } from "./serialize-trip.js";
+import { coverImageUrlFromStops, coverLocationFromTrip } from "./cover-image.js";
+import { serializeTrip } from "./serialize-trip.js";
 import { serializePlanResponse } from "./serialize-plan-response.js";
 import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-preferences.js";
-import { buildPlanNodeDrafts, parentPathOf, slugify, type PlannedNodeDraft } from "./persist-plan.js";
+import { buildPlanDrafts, slugify, type PlanMediaDraft, type PlanStopDraft } from "./persist-plan.js";
+import { createCatalogLink } from "./write-catalog.js";
 import { resolvePlanDates } from "../../planner/domain/clarifications.js";
 import {
   applyPlanAnswers,
@@ -33,6 +34,24 @@ import {
   requiredTravelDateClarification,
   splitClarifications,
 } from "../../planner/domain/extract-slots.js";
+import type { PlanningChatState } from "../../planner/domain/planning-draft.js";
+import {
+  applySelectedStop,
+  buildPlanningChatState,
+  canSearchDraft,
+  draftCardFromSkeleton,
+  draftRowDataFromCard,
+  draftsEqual,
+  emptyDraftCard,
+  mergeSkeletonIntoDraft,
+  planningPromptFromDraft,
+  preferencesFromDraft,
+  skeletonFromDraftCard,
+  snapshotCard,
+  textHistoryFromMessages,
+  tripUpdateFromDraft,
+} from "./planning-chat.js";
+import { randomUUID } from "node:crypto";
 
 export type CreateTripInput = {
   userId: string;
@@ -54,8 +73,59 @@ export type JourneyServiceOptions = {
   logs?: ApplicationLogService;
 };
 
-type JourneyDb = Pick<PrismaClient, "user" | "trip" | "pipelineNode" | "$transaction"> &
+type JourneyDb = Pick<
+  PrismaClient,
+  | "user"
+  | "trip"
+  | "journey"
+  | "stop"
+  | "booking"
+  | "media"
+  | "note"
+  | "catalogFlight"
+  | "catalogHotel"
+  | "catalogEvent"
+  | "catalogPlace"
+  | "catalogRoute"
+  | "catalogWeather"
+  | "catalogVisa"
+  | "catalogChecklist"
+  | "planningDraft"
+  | "planningMessage"
+  | "$transaction"
+> &
   ApplicationLogDb;
+
+const stopGraphInclude = {
+  bookings: {
+    orderBy: { sortOrder: "asc" as const },
+    include: {
+      flight: true,
+      hotel: true,
+      event: true,
+      place: true,
+      route: true,
+      weather: true,
+      visa: true,
+      checklist: true,
+    },
+  },
+  medias: { orderBy: { sortOrder: "asc" as const } },
+  notes: true,
+  budgets: true,
+} satisfies Prisma.StopInclude;
+
+const tripGraphInclude = {
+  journey: {
+    include: {
+      stops: {
+        where: { deletedAt: null },
+        orderBy: [{ depth: "asc" as const }, { sortOrder: "asc" as const }],
+        include: stopGraphInclude,
+      },
+    },
+  },
+} satisfies Prisma.TripInclude;
 
 export class JourneyService {
   private readonly cache?: CacheStore;
@@ -101,25 +171,13 @@ export class JourneyService {
           status: "draft",
         },
       });
-
-      const root = await tx.pipelineNode.create({
+      const journey = await tx.journey.create({
         data: {
           tripId: created.id,
-          parentId: null,
-          depth: 0,
-          path: "trip",
-          sortOrder: 0,
-          type: "JOURNEY",
-          title: input.title,
-          origin: "user",
+          name: input.title,
         },
       });
-
-      return tx.trip.update({
-        where: { id: created.id },
-        data: { rootNodeId: root.id },
-        include: { nodes: { where: { deletedAt: null }, orderBy: { sortOrder: "asc" } } },
-      });
+      return { ...created, journey: { ...journey, stops: [] } };
     });
 
     await this.invalidateUserTrips(input.userId, trip.id);
@@ -137,12 +195,7 @@ export class JourneyService {
         this.db.trip.findMany({
           where: { userId },
           orderBy: { updatedAt: "desc" },
-          include: {
-            nodes: {
-              where: { deletedAt: null, type: "CHECKPOINT" },
-              orderBy: { sortOrder: "asc" },
-            },
-          },
+          include: tripGraphInclude,
         }).then((rows) => rows.map(serializeTrip)),
     );
     return Promise.all(trips.map((trip) => this.withCoverImage(trip)));
@@ -158,12 +211,7 @@ export class JourneyService {
       async () => {
         const trip = await this.db.trip.findFirst({
           where: { id: tripId, userId },
-          include: {
-            nodes: {
-              where: { deletedAt: null },
-              orderBy: [{ depth: "asc" }, { sortOrder: "asc" }],
-            },
-          },
+          include: tripGraphInclude,
         });
         if (!trip) throw new NotFoundError("Trip not found");
         return serializeTrip(trip);
@@ -171,14 +219,395 @@ export class JourneyService {
     ).then((trip) => this.withCoverImage(trip));
   }
 
-  /** Public trip/plan payload: stops + catalog (no flat nodes[]). */
+  /** Public trip/plan payload: stops + catalog. */
   async getTripPlan(tripId: string, userId: string) {
     const trip = await this.getTrip(tripId, userId);
     return serializePlanResponse({ trip });
   }
 
+  /** Resume planning chat: messages + live draft. No provider calls. */
+  async getPlanningChat(tripId: string, userId: string): Promise<PlanningChatState> {
+    const trip = await this.db.trip.findFirst({
+      where: { id: tripId, userId },
+      select: { id: true, destinationSummary: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+
+    const [draft, messages] = await Promise.all([
+      this.db.planningDraft.findUnique({ where: { tripId } }),
+      this.db.planningMessage.findMany({
+        where: { tripId },
+        orderBy: { position: "asc" },
+      }),
+    ]);
+
+    return buildPlanningChatState({
+      tripId,
+      draft,
+      messages,
+      destinationSummary: trip.destinationSummary,
+    });
+  }
+
+  /**
+   * Append a user chat turn, revise the live draft via LLM only, and return full chat state.
+   * Provider APIs are not called here.
+   */
+  async postPlanningMessage(input: {
+    tripId: string;
+    userId: string;
+    text: string;
+    stopId?: string;
+    answers?: Record<string, unknown>;
+  }): Promise<PlanningChatState> {
+    if (!this.planner) throw new ValidationError("Planner is not configured");
+    const text = input.text?.trim();
+    if (!text) throw new ValidationError("text is required");
+
+    const trip = await this.db.trip.findFirst({
+      where: { id: input.tripId, userId: input.userId },
+      include: { journey: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+    if (trip.status !== "draft" && trip.status !== "planning") {
+      throw new ValidationError("Planning chat is closed for this trip");
+    }
+
+    const existingDraft = await this.db.planningDraft.findUnique({
+      where: { tripId: input.tripId },
+    });
+    const existingMessages = await this.db.planningMessage.findMany({
+      where: { tripId: input.tripId },
+      orderBy: { position: "asc" },
+    });
+    const nextPosition = (existingMessages[existingMessages.length - 1]?.position ?? -1) + 1;
+
+    const storedPreference = await this.readStoredPreference(input.userId);
+    let liveDraft = applySelectedStop(
+      existingDraft ? buildPlanningChatState({
+        tripId: input.tripId,
+        draft: existingDraft,
+        messages: [],
+        destinationSummary: trip.destinationSummary,
+      }).draft : emptyDraftCard(),
+      input.stopId,
+    );
+
+    const preferences = applyPlanAnswers(
+      mergePlanPreferences({
+        stored: storedPreference,
+        request: preferencesFromDraft(liveDraft),
+        tripOriginCity: trip.originCity,
+      }),
+      input.answers,
+    );
+
+    const userMessageId = randomUUID();
+    await this.db.planningMessage.create({
+      data: {
+        id: userMessageId,
+        tripId: input.tripId,
+        position: nextPosition,
+        role: "user",
+        kind: "text",
+        body: text,
+        draftStopId: input.stopId ?? null,
+      },
+    });
+
+    let assistantMessages: Array<{
+      role: "assistant";
+      kind: "text" | "skeleton" | "clarification";
+      body: string | null;
+      draftStopId?: string | null;
+      payload?: Prisma.InputJsonValue | null;
+    }> = [];
+
+    const hasDraftStops = liveDraft.stops.some(
+      (stop) => stop.kind === "stay" || stop.kind === "transit",
+    );
+
+    if (!hasDraftStops) {
+      const slots = await this.planner.extractPlanSlots({
+        prompt: text,
+        preferences,
+      });
+      const mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
+      if (slots.extracted.destination && !liveDraft.destinationSummary) {
+        liveDraft = {
+          ...liveDraft,
+          destinationSummary: slots.extracted.destination,
+          originCity: mergedPreferences.originCity ?? liveDraft.originCity,
+          startDate: mergedPreferences.startDate ?? liveDraft.startDate,
+          endDate: mergedPreferences.endDate ?? liveDraft.endDate,
+          partySize: mergedPreferences.partySize ?? liveDraft.partySize,
+          budgetTone: mergedPreferences.budgetTone ?? liveDraft.budgetTone,
+        };
+      } else {
+        liveDraft = {
+          ...liveDraft,
+          originCity: mergedPreferences.originCity ?? liveDraft.originCity,
+          startDate: mergedPreferences.startDate ?? liveDraft.startDate,
+          endDate: mergedPreferences.endDate ?? liveDraft.endDate,
+          partySize: mergedPreferences.partySize ?? liveDraft.partySize,
+          budgetTone: mergedPreferences.budgetTone ?? liveDraft.budgetTone,
+        };
+      }
+
+      const missing = ensureCriticalClarifications(
+        filterResolvedClarifications(slots.missing, mergedPreferences, input.answers),
+        mergedPreferences,
+      );
+      const { required } = splitClarifications(missing);
+
+      if (required.length > 0) {
+        assistantMessages = [
+          {
+            role: "assistant",
+            kind: "text",
+            body: "Ada beberapa detail yang masih dibutuhkan sebelum rancangan bisa dilanjutkan.",
+          },
+          ...required.map((clarification) => ({
+            role: "assistant" as const,
+            kind: "clarification" as const,
+            body: clarification.question,
+            payload: { clarification } as Prisma.InputJsonValue,
+          })),
+        ];
+        await this.persistPlanningTurn({
+          tripId: input.tripId,
+          userId: input.userId,
+          startPosition: nextPosition + 1,
+          draft: liveDraft,
+          phase: "collecting",
+          tripPatch: tripUpdateFromDraft(liveDraft),
+          assistantMessages,
+        });
+        return this.getPlanningChat(input.tripId, input.userId);
+      }
+
+      const { skeleton } = await this.planner.planSkeleton(
+        { prompt: text, preferences: mergedPreferences },
+        {
+          tripOriginCity: trip.originCity,
+          preferences: mergedPreferences,
+        },
+        { tripId: input.tripId, userId: input.userId },
+      );
+      const nextDraft = applySelectedStop(draftCardFromSkeleton(skeleton), input.stopId);
+      const reply =
+        nextDraft.concept && nextDraft.tone
+          ? `Konsepnya ${nextDraft.concept}. ${nextDraft.tone} Ini rancangannya.`
+          : "Ini rancangan perjalanannya. Penerbangan dan hotel belum dicari.";
+      assistantMessages = [
+        { role: "assistant", kind: "text", body: reply },
+        {
+          role: "assistant",
+          kind: "skeleton",
+          body: null,
+          draftStopId: nextDraft.selectedStopId,
+          payload: { card: snapshotCard(nextDraft) } as Prisma.InputJsonValue,
+        },
+      ];
+      await this.persistPlanningTurn({
+        tripId: input.tripId,
+        userId: input.userId,
+        startPosition: nextPosition + 1,
+        draft: nextDraft,
+        phase: "draft",
+        tripPatch: tripUpdateFromDraft(nextDraft),
+        assistantMessages,
+      });
+      return this.getPlanningChat(input.tripId, input.userId);
+    }
+
+    const history = textHistoryFromMessages(existingMessages);
+    const revision = await this.planner.revisePlanningDraft({
+      history,
+      currentDraft: liveDraft,
+      latestMessage: text,
+      stopId: input.stopId,
+      preferences,
+      normalizeOptions: {
+        tripOriginCity: trip.originCity,
+        preferences,
+      },
+      logContext: { tripId: input.tripId, userId: input.userId },
+    });
+
+    let nextDraft = liveDraft;
+    let phase: "collecting" | "draft" = existingDraft?.phase === "collecting" ? "collecting" : "draft";
+    assistantMessages = [{ role: "assistant", kind: "text", body: revision.reply }];
+
+    if (revision.clarifications.length > 0) {
+      phase = "collecting";
+      assistantMessages.push(
+        ...revision.clarifications.map((clarification) => ({
+          role: "assistant" as const,
+          kind: "clarification" as const,
+          body: clarification.question,
+          payload: { clarification } as Prisma.InputJsonValue,
+        })),
+      );
+    }
+
+    if (revision.skeleton) {
+      nextDraft = mergeSkeletonIntoDraft(liveDraft, revision.skeleton, input.stopId);
+      if (!draftsEqual(liveDraft, nextDraft)) {
+        phase = canSearchDraft(nextDraft, "draft") ? "draft" : "collecting";
+        assistantMessages.push({
+          role: "assistant",
+          kind: "skeleton",
+          body: null,
+          draftStopId: nextDraft.selectedStopId,
+          payload: { card: snapshotCard(nextDraft) } as Prisma.InputJsonValue,
+        });
+      }
+    }
+
+    await this.persistPlanningTurn({
+      tripId: input.tripId,
+      userId: input.userId,
+      startPosition: nextPosition + 1,
+      draft: nextDraft,
+      phase,
+      tripPatch: tripUpdateFromDraft(nextDraft),
+      assistantMessages,
+    });
+    return this.getPlanningChat(input.tripId, input.userId);
+  }
+
+  /**
+   * Lock the live draft and run provider search (existing planTrip pipeline).
+   */
+  async searchPlanningDraft(input: {
+    tripId: string;
+    userId: string;
+    context?: PlannerToolContext;
+  }): Promise<{ planning: PlanningChatState; plan: unknown }> {
+    if (!this.planner) throw new ValidationError("Planner is not configured");
+
+    const state = await this.getPlanningChat(input.tripId, input.userId);
+    if (!state.canSearch) {
+      throw new ValidationError("Draft is not ready to search");
+    }
+
+    await this.db.planningDraft.update({
+      where: { tripId: input.tripId },
+      data: { phase: "searching" },
+    });
+
+    const skeleton = skeletonFromDraftCard(state.draft);
+    const prompt = planningPromptFromDraft(state.draft, state.draft.title || "Trip");
+    const preferences = preferencesFromDraft(state.draft);
+
+    try {
+      const plan = await this.planTrip({
+        tripId: input.tripId,
+        userId: input.userId,
+        prompt,
+        preferences,
+        answers: {
+          startDate: state.draft.startDate,
+          endDate: state.draft.endDate,
+          originCity: state.draft.originCity,
+          partySize: state.draft.partySize,
+        },
+        context: input.context,
+        executeTools: true,
+        skeleton,
+      });
+
+      const messages = await this.db.planningMessage.findMany({
+        where: { tripId: input.tripId },
+        orderBy: { position: "asc" },
+      });
+      const position = (messages[messages.length - 1]?.position ?? -1) + 1;
+      await this.db.planningMessage.create({
+        data: {
+          id: randomUUID(),
+          tripId: input.tripId,
+          position,
+          role: "assistant",
+          kind: "text",
+          body: "Pencarian dimulai. Penerbangan, hotel, dan detail lainnya sedang dicari.",
+        },
+      });
+      await this.db.planningDraft.update({
+        where: { tripId: input.tripId },
+        data: { phase: "ready" },
+      });
+
+      return {
+        planning: await this.getPlanningChat(input.tripId, input.userId),
+        plan,
+      };
+    } catch (err) {
+      await this.db.planningDraft.update({
+        where: { tripId: input.tripId },
+        data: { phase: "draft" },
+      });
+      throw err;
+    }
+  }
+
+  private async persistPlanningTurn(input: {
+    tripId: string;
+    userId: string;
+    startPosition: number;
+    draft: ReturnType<typeof emptyDraftCard>;
+    phase: "collecting" | "draft" | "searching" | "ready";
+    tripPatch: ReturnType<typeof tripUpdateFromDraft>;
+    assistantMessages: Array<{
+      role: "assistant";
+      kind: "text" | "skeleton" | "clarification";
+      body: string | null;
+      draftStopId?: string | null;
+      payload?: Prisma.InputJsonValue | null;
+    }>;
+  }) {
+    await this.db.$transaction(async (tx) => {
+      const data = draftRowDataFromCard(input.draft, input.phase);
+      await tx.planningDraft.upsert({
+        where: { tripId: input.tripId },
+        create: {
+          id: randomUUID(),
+          tripId: input.tripId,
+          ...data,
+        },
+        update: data,
+      });
+
+      if (Object.keys(input.tripPatch).length > 0) {
+        await tx.trip.update({
+          where: { id: input.tripId },
+          data: input.tripPatch,
+        });
+      }
+
+      for (const [index, message] of input.assistantMessages.entries()) {
+        await tx.planningMessage.create({
+          data: {
+            id: randomUUID(),
+            tripId: input.tripId,
+            position: input.startPosition + index,
+            role: message.role,
+            kind: message.kind,
+            body: message.body,
+            draftStopId: message.draftStopId ?? null,
+            payload: message.payload ?? undefined,
+          },
+        });
+      }
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId);
+  }
+
   async listChildren(tripId: string, userId: string, parentId: string | null) {
-    await this.getTrip(tripId, userId);
+    const trip = await this.getTrip(tripId, userId);
+    const journey = trip.journey;
+    if (!journey?.id) return [];
     return getOrSet(
       {
         cache: this.cache,
@@ -186,14 +615,14 @@ export class JourneyService {
         ttlSeconds: this.ttlSeconds,
       },
       () =>
-        this.db.pipelineNode.findMany({
+        this.db.stop.findMany({
           where: {
-            tripId,
-            parentId,
+            journeyId: journey.id,
+            parentStopId: !parentId || parentId === journey.id ? null : parentId,
             deletedAt: null,
           },
           orderBy: { sortOrder: "asc" },
-        }).then((nodes) => nodes.map(serializeTripNode)),
+        }).then((stops) => stops.map((stop) => stopAsNode(stop, journey.id))),
     );
   }
 
@@ -215,40 +644,44 @@ export class JourneyService {
     isCustom?: boolean;
   }) {
     const trip = await this.getTrip(input.tripId, input.userId);
-    const parent = trip.nodes.find((n) => n.id === input.parentId);
-    if (!parent) throw new ValidationError("parentId not found in trip");
+    const journey = trip.journey;
+    if (!journey?.id) throw new ValidationError("Trip journey missing");
+    const parentStop = (journey.stops ?? []).find((stop) => stop.id === input.parentId) ?? null;
+    if (!parentStop && input.parentId !== journey.id) {
+      throw new ValidationError("parentId not found in trip");
+    }
 
-    const siblings = trip.nodes.filter((n) => n.parentId === input.parentId);
-    const sortOrder = siblings.length;
-
-    const node = await this.db.pipelineNode.create({
+    const siblings = (journey.stops ?? []).filter((stop) =>
+      parentStop ? stop.parentStopId === parentStop.id : stop.parentStopId == null,
+    );
+    const used = new Set((journey.stops ?? []).map((stop) => stop.slug));
+    const slug = unusedSlug(slugify(input.title), used);
+    const kind = nodeTypeToKind(input.type);
+    const parentPath = parentStop?.path ?? "journey";
+    const stop = await this.db.stop.create({
       data: {
-        tripId: input.tripId,
-        parentId: input.parentId,
-        depth: parent.depth + 1,
-        path: `${parent.path}/${slugify(input.title)}`,
-        sortOrder,
-        type: input.type,
-        title: input.title,
-        contentType: input.contentType,
-        content: input.content,
-        costAmount: input.costAmount ?? 0,
-        costCurrency: input.costCurrency ?? trip.baseCurrency,
-        durationMinutes: input.durationMinutes ?? 0,
-        deepLinkUrl: input.deepLinkUrl,
-        provider: input.provider,
-        providerRef: input.providerRef,
+        journeyId: journey.id,
+        parentStopId: parentStop?.id ?? null,
+        kind,
+        hubRole: kind === "hub" ? "origin" : null,
+        slug,
+        name: input.title,
+        sortOrder: siblings.length,
+        depth: parentStop ? parentStop.depth + 1 : 0,
+        path: `${parentPath}/${slug}`,
+        city: input.title,
         origin: input.origin ?? "user",
         isCustom: input.isCustom ?? true,
       },
     });
 
     await this.invalidateUserTrips(input.userId, input.tripId, input.parentId);
-    return serializeTripNode(node);
+    return stopAsNode(stop, journey.id);
   }
 
   /**
-   * Full plan flow: LLM skeleton → MCP tools → persist AI nodes → cost roll-up.
+   * Full plan flow: LLM skeleton → MCP tools → persist stops and catalog → cost roll-up.
+   * Pass `skeleton` to skip slot extraction / skeleton LLM (used by planning chat search).
    */
   async planTrip(input: {
     tripId: string;
@@ -258,15 +691,13 @@ export class JourneyService {
     answers?: Record<string, unknown>;
     context?: PlannerToolContext;
     executeTools?: boolean;
+    skeleton?: TripSkeleton;
   }) {
     if (!this.planner) {
       throw new ValidationError("Planner is not configured");
     }
 
     const trip = await this.getTrip(input.tripId, input.userId);
-    const root = trip.nodes.find((n) => n.parentId === null);
-    if (!root) throw new ValidationError("Trip root node missing");
-
     const storedPreference = await this.readStoredPreference(input.userId);
     const preferences = applyPlanAnswers(
       mergePlanPreferences({
@@ -276,20 +707,27 @@ export class JourneyService {
       }),
       input.answers,
     );
-    const slots = await this.planner.extractPlanSlots({
-      prompt: input.prompt,
-      preferences,
-    });
-    const mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
-    const missing = ensureCriticalClarifications(
-      filterResolvedClarifications(slots.missing, mergedPreferences, input.answers),
-      mergedPreferences,
-    );
-    const { required, recommended } = splitClarifications(missing);
-    if (required.length > 0) {
-      throw new PlanNeedsInputError(required, {
-        extracted: publicExtractedSlots(mergedPreferences),
+
+    let mergedPreferences = preferences;
+    let slots: Awaited<ReturnType<PlannerService["extractPlanSlots"]>> | null = null;
+    let recommended: ReturnType<typeof splitClarifications>["recommended"] = [];
+    if (!input.skeleton) {
+      slots = await this.planner.extractPlanSlots({
+        prompt: input.prompt,
+        preferences,
       });
+      mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
+      const missing = ensureCriticalClarifications(
+        filterResolvedClarifications(slots.missing, mergedPreferences, input.answers),
+        mergedPreferences,
+      );
+      const split = splitClarifications(missing);
+      recommended = split.recommended;
+      if (split.required.length > 0) {
+        throw new PlanNeedsInputError(split.required, {
+          extracted: publicExtractedSlots(mergedPreferences),
+        });
+      }
     }
 
     await this.db.trip.update({
@@ -304,6 +742,7 @@ export class JourneyService {
         answers: input.answers,
         context: input.context,
         executeTools: input.executeTools !== false,
+        providedSkeleton: Boolean(input.skeleton),
       },
       slotExtraction: slots,
     };
@@ -319,22 +758,24 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
-      const { skeleton, llm } = await this.planner.planSkeleton(
-        {
-          prompt: input.prompt,
-          preferences: mergedPreferences,
-        },
-        {
-          tripOriginCity: trip.originCity,
-          preferences: mergedPreferences,
-        },
-        {
-          tripId: input.tripId,
-          userId: input.userId,
-        },
-      );
+      const { skeleton, llm } = input.skeleton
+        ? { skeleton: input.skeleton, llm: this.planner.llmName }
+        : await this.planner.planSkeleton(
+            {
+              prompt: input.prompt,
+              preferences: mergedPreferences,
+            },
+            {
+              tripOriginCity: trip.originCity,
+              preferences: mergedPreferences,
+            },
+            {
+              tripId: input.tripId,
+              userId: input.userId,
+            },
+          );
       await planLog?.progress({
-        message: "LLM skeleton generated",
+        message: input.skeleton ? "Locked planning draft loaded" : "LLM skeleton generated",
         payload: {
           ...initialLogPayload,
           skeleton,
@@ -355,12 +796,14 @@ export class JourneyService {
         assumedEndDate: skeleton.assumedEndDate,
       });
 
-      // Prefer explicit user dates; do not invent a trip from skeleton assumptions alone.
       if (!hasConcreteTravelDates(mergedPreferences, input.answers) || !dates.start) {
         throw new PlanNeedsInputError([requiredTravelDateClarification()], {
           extracted: publicExtractedSlots(mergedPreferences),
         });
       }
+
+      const journeyId = trip.journey?.id;
+      if (!journeyId) throw new ValidationError("Trip journey missing");
 
       const context: PlannerToolContext = {
         adults: mergedPreferences.partySize ?? trip.partySize,
@@ -382,18 +825,17 @@ export class JourneyService {
             })),
           };
 
-      const drafts = await this.enrichCheckpointImages(
-        buildPlanNodeDrafts(skeleton, execution, {
+      const drafts = await this.enrichStopImages(
+        buildPlanDrafts(skeleton, execution, {
           originCity: skeleton.originCity,
           returnCity: skeleton.originCity,
           startDate: dates.start,
           endDate: dates.end,
         }),
       );
-      await this.replaceAiPlanNodes({
+      await this.replaceAiPlan({
         tripId: input.tripId,
-        rootId: root.id,
-        rootPath: root.path,
+        journeyId,
         baseCurrency: trip.baseCurrency,
         drafts,
       });
@@ -414,6 +856,13 @@ export class JourneyService {
           partySize: skeleton.partySize ?? trip.partySize,
           planningVersion: { increment: 1 },
           lastPlannedAt: new Date(),
+        },
+      });
+      await this.db.journey.update({
+        where: { id: journeyId },
+        data: {
+          name: skeleton.title || trip.title,
+          ...(skeleton.destinationSummary ? { summary: skeleton.destinationSummary } : {}),
         },
       });
 
@@ -450,39 +899,35 @@ export class JourneyService {
     }
   }
 
-  private async enrichCheckpointImages(drafts: PlannedNodeDraft[]): Promise<PlannedNodeDraft[]> {
+  private async enrichStopImages(drafts: PlanStopDraft[]): Promise<PlanStopDraft[]> {
     if (!this.images) return drafts;
 
     return Promise.all(
       drafts.map(async (draft) => {
-        if (draft.type !== "CHECKPOINT" || !draft.content || typeof draft.content !== "object") {
-          return draft;
-        }
-        const content = draft.content as Record<string, unknown>;
-        const city = typeof content.city === "string" ? content.city : draft.title;
+        if (draft.kind !== "stay" && draft.kind !== "hub") return draft;
+        const city = draft.city || draft.name;
         if (!city) return draft;
 
         try {
           const images = await this.images!.searchByLocation(city, { perPage: 1 });
           const image = images[0];
           if (!image) return draft;
-          return {
-            ...draft,
-            content: {
-              ...content,
-              thumbnailUrl: image.thumbUrl || image.imageUrl,
-              imageUrl: image.imageUrl,
-              imageAttribution: {
-                photographerName: image.photographerName,
-                photographerUrl: image.photographerUrl,
-                unsplashUrl: image.unsplashUrl,
-                provider: image.provider,
-                photoId: image.photoId,
-              },
+          const media: PlanMediaDraft = {
+            imageUrl: image.imageUrl,
+            thumbnailUrl: image.thumbUrl || image.imageUrl,
+            provider: image.provider,
+            providerRef: image.photoId,
+            attribution: {
+              photographerName: image.photographerName,
+              photographerUrl: image.photographerUrl,
+              unsplashUrl: image.unsplashUrl,
+              provider: image.provider,
+              photoId: image.photoId,
             },
           };
+          return { ...draft, media };
         } catch (err) {
-          console.warn("[traverior-api:images] checkpoint enrich failed", {
+          console.warn("[traverior-api:images] stop enrich failed", {
             city,
             err: String(err),
           });
@@ -492,94 +937,133 @@ export class JourneyService {
     );
   }
 
-  private async replaceAiPlanNodes(input: {
+  private async replaceAiPlan(input: {
     tripId: string;
-    rootId: string;
-    rootPath: string;
+    journeyId: string;
     baseCurrency: string;
-    drafts: PlannedNodeDraft[];
+    drafts: PlanStopDraft[];
   }) {
-    const existing = await this.db.pipelineNode.findMany({
+    const existing = await this.db.stop.findMany({
       where: {
-        tripId: input.tripId,
+        journeyId: input.journeyId,
         OR: [{ deletedAt: null }, { suppressAiRestore: true }],
-      },
-      select: {
-        id: true,
-        parentId: true,
-        path: true,
-        type: true,
-        origin: true,
-        sortOrder: true,
-        isLocked: true,
-        isCustom: true,
-        suppressAiRestore: true,
-        deletedAt: true,
       },
     });
 
-    const { replaceable, preserved } = this.policy.planReplacement(existing);
+    const { replaceable, preserved } = this.policy.planReplacement(
+      existing.map((stop) => ({
+        id: stop.id,
+        path: stop.path,
+        parentId: stop.parentStopId,
+        kind: stop.kind,
+        origin: stop.origin,
+        isLocked: stop.isLocked,
+        isCustom: stop.isCustom,
+        suppressAiRestore: stop.suppressAiRestore,
+        deletedAt: stop.deletedAt,
+      })),
+    );
     const now = new Date();
-    for (const node of replaceable) {
-      await this.db.pipelineNode.update({
-        where: { id: node.id },
+    for (const stop of replaceable) {
+      if (stop.deletedAt) continue;
+      await this.db.stop.update({
+        where: { id: stop.id },
         data: { deletedAt: now },
       });
     }
 
-    const pathToId = new Map<string, string>([[input.rootPath, input.rootId]]);
-    const sortByParent = new Map<string, number>();
-    for (const node of existing) {
-      if (node.deletedAt || !node.path) continue;
-      if (replaceable.some((item) => item.id === node.id)) continue;
-      pathToId.set(node.path, node.id);
-      const parentPath = parentPathOf(node.path);
-      const next = (sortByParent.get(parentPath) ?? 0);
-      sortByParent.set(parentPath, Math.max(next, node.sortOrder + 1));
+    const pathToId = new Map<string, string>();
+    const replaceableIds = new Set(replaceable.map((stop) => stop.id));
+    let sortOrder = 0;
+    for (const stop of existing) {
+      if (stop.deletedAt || replaceableIds.has(stop.id)) continue;
+      pathToId.set(stop.path, stop.id);
+      sortOrder = Math.max(sortOrder, stop.sortOrder + 1);
     }
 
     const drafts = this.policy.filterDrafts(input.drafts, preserved);
-
     for (const draft of drafts) {
-      const parentPath = parentPathOf(draft.path);
-      const parentId = pathToId.get(parentPath);
-      if (!parentId) {
-        throw new ValidationError(`Missing parent path ${parentPath}`);
-      }
       if (pathToId.has(draft.path)) continue;
-
-      const depth = draft.path.split("/").filter(Boolean).length - 1;
-      const sortOrder = sortByParent.get(parentPath) ?? 0;
-      sortByParent.set(parentPath, sortOrder + 1);
-
-      const created = await this.db.pipelineNode.create({
+      const created = await this.db.stop.create({
         data: {
-          tripId: input.tripId,
-          parentId,
-          depth,
-          path: draft.path,
-          sortOrder,
-          type: draft.type,
-          checkpointKind: draft.checkpointKind,
-          title: draft.title,
+          journeyId: input.journeyId,
+          parentStopId: null,
+          kind: draft.kind,
+          hubRole: draft.kind === "hub" ? (draft.hubRole ?? "origin") : null,
+          slug: draft.slug,
+          name: draft.name,
           subtitle: draft.subtitle,
-          contentType: draft.contentType,
-          content: draft.content,
-          costAmount: draft.costAmount ?? 0,
-          costCurrency: draft.costCurrency ?? input.baseCurrency,
-          costIsEstimate: true,
-          durationMinutes: draft.durationMinutes ?? 0,
+          status: "planned",
+          sortOrder,
+          depth: 0,
+          path: draft.path,
+          days: draft.days,
+          countryCode: countryCode(draft.countryCode),
+          city: draft.city,
           scheduleStart: draft.scheduleStart,
           scheduleEnd: draft.scheduleEnd,
-          deepLinkUrl: draft.deepLinkUrl,
-          provider: draft.provider,
-          providerRef: draft.providerRef,
+          dateStart: dayOrUndefined(draft.dateStart),
+          dateEnd: dayOrUndefined(draft.dateEnd),
           origin: "ai",
           isCustom: false,
           lastRefreshedAt: now,
         },
       });
+      sortOrder += 1;
       pathToId.set(draft.path, created.id);
+      await this.attachDraft(input.tripId, created.id, input.baseCurrency, draft);
+    }
+  }
+
+  private async attachDraft(tripId: string, stopId: string, baseCurrency: string, draft: PlanStopDraft) {
+    let sortOrder = 0;
+    for (const booking of draft.bookings) {
+      const link = await createCatalogLink(this.db, tripId, booking);
+      if (!Object.values(link).some(Boolean)) continue;
+      await this.db.booking.create({
+        data: {
+          stopId,
+          kind: booking.kind,
+          role: booking.role,
+          sortOrder,
+          ...link,
+          deepLinkUrl: booking.deepLinkUrl,
+          costAmount: booking.costAmount,
+          costCurrency: (booking.costCurrency ?? baseCurrency).slice(0, 3),
+          costIsEstimate: true,
+          origin: "ai",
+        },
+      });
+      sortOrder += 1;
+    }
+
+    for (const note of draft.notes) {
+      await this.db.note.create({
+        data: {
+          tripId,
+          stopId,
+          kind: note.kind,
+          title: note.title,
+          body: note.body,
+          origin: "ai",
+        },
+      });
+    }
+
+    if (draft.media?.imageUrl) {
+      await this.db.media.create({
+        data: {
+          tripId,
+          stopId,
+          role: "cover",
+          imageUrl: draft.media.imageUrl,
+          thumbnailUrl: draft.media.thumbnailUrl,
+          provider: draft.media.provider,
+          providerRef: draft.media.providerRef,
+          attribution: draft.media.attribution as Prisma.InputJsonValue | undefined,
+          sortOrder: 0,
+        },
+      });
     }
   }
 
@@ -593,22 +1077,22 @@ export class JourneyService {
     return {
       budgetStyle: preference.budgetStyle as StoredTravelPreference["budgetStyle"],
       pace: preference.pace as StoredTravelPreference["pace"],
+      homeCity: preference.homeCity,
+      passportCountry: preference.passportCountry,
       extra: preference.extra,
     };
   }
 
-  private async withCoverImage<T extends {
-    title: string;
-    destinationSummary?: string | null;
-    nodes?: Array<{
-      type?: string;
-      checkpointKind?: string | null;
-      title?: string;
-      content?: unknown;
-    }>;
-  }>(trip: T) {
-    const fromNodes = coverImageUrlFromNodes(trip.nodes);
-    if (fromNodes) return { ...trip, coverImageUrl: fromNodes };
+  private async withCoverImage<
+    T extends Parameters<typeof coverLocationFromTrip>[0] & { status?: string },
+  >(trip: T) {
+    const fromStops = coverImageUrlFromStops(trip.journey?.stops ?? undefined);
+    if (fromStops) return { ...trip, coverImageUrl: fromStops };
+
+    // Chat-planning drafts must not call Unsplash / other image providers.
+    if (trip.status === "draft") {
+      return { ...trip, coverImageUrl: null };
+    }
 
     const location = coverLocationFromTrip(trip);
     if (!location || !this.images) return { ...trip, coverImageUrl: null };
@@ -622,15 +1106,15 @@ export class JourneyService {
   }
 
   private listKey(userId: string) {
-    return cacheKey("trips:list", { userId, v: 2 });
+    return cacheKey("trips:list", { userId, v: 3 });
   }
 
   private tripKey(tripId: string, userId: string) {
-    return cacheKey("trips:get", { tripId, userId });
+    return cacheKey("trips:get", { tripId, userId, v: 3 });
   }
 
   private childrenKey(tripId: string, userId: string, parentId: string | null) {
-    return cacheKey("trips:children", { tripId, userId, parentId });
+    return cacheKey("trips:children", { tripId, userId, parentId, v: 3 });
   }
 
   private async invalidateUserTrips(
@@ -653,4 +1137,93 @@ export class JourneyService {
       }
     }
   }
+}
+
+function dayOrUndefined(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+}
+
+function countryCode(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const code = value.trim().toUpperCase();
+  return code.length >= 2 ? code.slice(0, 2) : undefined;
+}
+
+function unusedSlug(base: string, used: Set<string>): string {
+  if (!used.has(base)) return base;
+  let index = 2;
+  while (used.has(`${base}_${index}`)) index += 1;
+  return `${base}_${index}`;
+}
+
+function nodeTypeToKind(type: string): StopKind {
+  switch (type) {
+    case "LEG":
+      return "travel";
+    case "CHECKPOINT":
+      return "stay";
+    default:
+      return "activity";
+  }
+}
+
+function stopAsNode(
+  stop: {
+    id: string;
+    parentStopId?: string | null;
+    depth?: number;
+    path?: string;
+    kind: string;
+    hubRole?: string | null;
+    name: string;
+    subtitle?: string | null;
+    status?: string;
+    sortOrder?: number;
+    scheduleStart?: Date | null;
+    scheduleEnd?: Date | null;
+    locationLat?: number | null;
+    locationLng?: number | null;
+    locationLabel?: string | null;
+    city?: string | null;
+    days?: number | null;
+    countryCode?: string | null;
+  },
+  journeyId: string,
+) {
+  const checkpointKind =
+    stop.hubRole === "origin"
+      ? "ORIGIN"
+      : stop.hubRole === "return"
+        ? "RETURN"
+        : stop.kind === "stay"
+          ? "STAY"
+          : stop.kind === "transit"
+            ? "TRANSIT"
+            : null;
+  return {
+    id: stop.id,
+    parentId: stop.parentStopId ?? journeyId,
+    depth: stop.depth ?? 0,
+    path: stop.path ?? "",
+    type: stop.kind === "travel" ? "LEG" : stop.kind === "activity" ? "ACTIVITY" : "CHECKPOINT",
+    checkpointKind,
+    title: stop.name,
+    subtitle: stop.subtitle ?? null,
+    status: stop.status ?? "planned",
+    sortOrder: stop.sortOrder ?? 0,
+    scheduleStart: stop.scheduleStart ?? null,
+    scheduleEnd: stop.scheduleEnd ?? null,
+    locationLat: stop.locationLat ?? null,
+    locationLng: stop.locationLng ?? null,
+    locationLabel: stop.locationLabel ?? stop.city ?? null,
+    contentType: stop.kind === "travel" ? "leg" : "checkpoint",
+    content: {
+      city: stop.city ?? stop.name,
+      days: stop.days ?? null,
+      countryCode: stop.countryCode ?? null,
+    },
+    costAmount: 0,
+    costCurrency: "IDR",
+  };
 }

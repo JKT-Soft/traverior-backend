@@ -17,7 +17,7 @@ const samplePlace = {
   provider: "google",
   providerRef: "ChIJos",
   tripId: null,
-  nodeId: null,
+  stopId: null,
   notes: null,
   extra: null,
   createdAt: new Date("2026-09-04T00:00:00.000Z"),
@@ -37,7 +37,7 @@ describe("SavedPlaceService", () => {
     const service = new SavedPlaceService({
       user: { upsert: createMockFn() },
       savedPlace: { findMany },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     const places = await service.listPlaces("user-1", { city: "Osaka" });
@@ -56,7 +56,7 @@ describe("SavedPlaceService", () => {
         findFirst: createMockFn(async () => null),
         create,
       },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     const result = await service.savePlace("user-1", {
@@ -83,7 +83,7 @@ describe("SavedPlaceService", () => {
         findFirst: createMockFn(async () => samplePlace),
         create,
       },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     const result = await service.savePlace("user-1", {
@@ -98,13 +98,13 @@ describe("SavedPlaceService", () => {
   });
 
   it("saves from a trip node", async () => {
-    const create = createMockFn(async (args: { data: { name: string; nodeId: string } }) => ({
+    const create = createMockFn(async (args: { data: { name: string; stopId: string } }) => ({
       ...samplePlace,
       name: args.data.name,
-      nodeId: args.data.nodeId,
+      stopId: args.data.stopId,
       source: "node",
       provider: "pipeline",
-      providerRef: args.data.nodeId,
+      providerRef: args.data.stopId,
     }));
     const service = new SavedPlaceService({
       user: { upsert: createMockFn() },
@@ -112,19 +112,17 @@ describe("SavedPlaceService", () => {
         findFirst: createMockFn(async () => null),
         create,
       },
-      pipelineNode: {
+      stop: {
         findFirst: createMockFn(async () => ({
           id: "22222222-2222-2222-2222-222222222222",
-          tripId: "trip-1",
-          title: "Dotonbori",
+          name: "Dotonbori",
           subtitle: "Namba",
+          city: "Osaka",
           locationLabel: "Osaka",
           locationLat: 34.6687,
           locationLng: 135.503,
-          provider: null,
-          providerRef: null,
-          content: { city: "Osaka" },
           deletedAt: null,
+          journey: { tripId: "trip-1" },
         })),
       },
     } as never);
@@ -142,7 +140,7 @@ describe("SavedPlaceService", () => {
     const service = new SavedPlaceService({
       user: { upsert: createMockFn() },
       savedPlace: { findFirst: createMockFn(), create: createMockFn() },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     await assert.rejects(
@@ -155,7 +153,7 @@ describe("SavedPlaceService", () => {
     const service = new SavedPlaceService({
       user: { upsert: createMockFn() },
       savedPlace: { findFirst: createMockFn(async () => null) },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     await assert.rejects(
@@ -174,7 +172,7 @@ describe("SavedPlaceService", () => {
         update,
         delete: del,
       },
-      pipelineNode: { findFirst: createMockFn() },
+      stop: { findFirst: createMockFn() },
     } as never);
 
     const updated = await service.updatePlace("user-1", samplePlace.id, { notes: "Go at sunset" });

@@ -15,6 +15,8 @@ const preferencesSchema = z
     interests: z.array(z.string()).optional(),
     travelWith: z.enum(["solo", "couple", "family", "friends"]).nullable().optional(),
     avoid: z.array(z.string()).optional(),
+    homeCity: z.string().trim().max(120).nullable().optional(),
+    passportCountry: z.string().trim().length(2).nullable().optional(),
     extra: z.record(z.unknown()).nullable().optional(),
   })
   .optional();

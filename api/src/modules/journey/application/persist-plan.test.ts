@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildPlanNodeDrafts, parentPathOf } from "./persist-plan.js";
+import { buildPlanDrafts, parentPathOf } from "./persist-plan.js";
 
 describe("persist-plan", () => {
   it("parentPathOf strips last segment", () => {
-    assert.equal(parentPathOf("trip/osaka"), "trip");
-    assert.equal(parentPathOf("trip/osaka/hotels-1"), "trip/osaka");
+    assert.equal(parentPathOf("journey/stay_osaka"), "journey");
+    assert.equal(parentPathOf("journey/stay_osaka/search_hotels_1"), "journey/stay_osaka");
   });
 
-  it("builds checkpoint + tool child drafts with default origin hub", () => {
-    const drafts = buildPlanNodeDrafts(
+  it("builds top-level stops and attaches the hotel booking to the stay", () => {
+    const drafts = buildPlanDrafts(
       {
         title: "Japan",
         checkpoints: [
@@ -52,22 +52,22 @@ describe("persist-plan", () => {
       },
     );
 
-    assert.equal(drafts[0]?.type, "CHECKPOINT");
-    assert.equal(drafts[0]?.checkpointKind, "ORIGIN");
-    assert.equal(drafts[0]?.title, "Jakarta");
-    assert.equal(drafts[1]?.type, "LEG");
-    assert.equal(drafts[2]?.type, "CHECKPOINT");
-    assert.equal(drafts[2]?.path, "trip/osaka");
-    assert.equal(drafts[3]?.type, "BOOKING");
-    assert.equal(drafts[3]?.title, "Hotel A");
-    assert.equal(drafts[3]?.costAmount, 100);
-    assert.ok(drafts[3]?.path.startsWith("trip/osaka/"));
-    assert.equal(drafts[4]?.type, "LEG");
-    assert.equal(drafts[5]?.checkpointKind, "RETURN");
+    assert.equal(drafts[0]?.kind, "hub");
+    assert.equal(drafts[0]?.hubRole, "origin");
+    assert.equal(drafts[0]?.name, "Jakarta");
+    assert.equal(drafts[1]?.kind, "travel");
+    const stay = drafts[2];
+    assert.equal(stay?.kind, "stay");
+    assert.equal(stay?.path, "journey/stay_osaka");
+    assert.equal(stay?.bookings[0]?.kind, "hotel");
+    assert.equal(stay?.bookings[0]?.payload.name, "Hotel A");
+    assert.equal(stay?.bookings[0]?.costAmount, 100);
+    assert.equal(drafts[3]?.kind, "travel");
+    assert.equal(drafts[4]?.hubRole, "return");
   });
 
-  it("builds origin, destination, and return pipeline when home city is provided", () => {
-    const drafts = buildPlanNodeDrafts(
+  it("builds origin, destination, and return stops when home city is provided", () => {
+    const drafts = buildPlanDrafts(
       {
         title: "Japan",
         originCity: "Jakarta",
@@ -112,16 +112,16 @@ describe("persist-plan", () => {
       { originCity: "Jakarta", returnCity: "Jakarta" },
     );
 
-    assert.equal(drafts[0]?.checkpointKind, "ORIGIN");
-    assert.equal(drafts[1]?.type, "LEG");
-    assert.equal(drafts[2]?.title, "Osaka");
-    assert.equal(drafts[4]?.type, "LEG");
-    assert.equal(drafts[5]?.checkpointKind, "RETURN");
-    assert.match(drafts[5]?.title ?? "", /Jakarta/i);
+    assert.equal(drafts[0]?.hubRole, "origin");
+    assert.equal(drafts[1]?.kind, "travel");
+    assert.equal(drafts[2]?.name, "Osaka");
+    assert.equal(drafts[3]?.kind, "travel");
+    assert.equal(drafts[4]?.hubRole, "return");
+    assert.match(drafts[4]?.name ?? "", /Jakarta/i);
   });
 
-  it("persists travel.tips child when checklist includes tips", () => {
-    const drafts = buildPlanNodeDrafts(
+  it("stores checklist bookings and travel-tip notes on the stay", () => {
+    const drafts = buildPlanDrafts(
       {
         title: "Japan",
         originCity: "Jakarta",
@@ -168,17 +168,14 @@ describe("persist-plan", () => {
       { originCity: "Jakarta", returnCity: "Jakarta" },
     );
 
-    const checklist = drafts.find((d) => d.contentType === "checklist");
-    const tips = drafts.find((d) => d.contentType === "travel.tips");
-    assert.ok(checklist);
-    assert.ok(tips);
-    assert.equal(tips?.title, "Travel tips");
-    const content = tips?.content as { tips?: Array<{ title?: string }> };
-    assert.equal(content.tips?.[0]?.title, "Getting around");
+    const stay = drafts.find((draft) => draft.kind === "stay");
+    assert.equal(stay?.bookings[0]?.kind, "checklist");
+    const tip = stay?.notes.find((note) => note.title === "Getting around");
+    assert.equal(tip?.body, "Use an IC card in Osaka.");
   });
 
-  it("assigns contiguous stay dates across destination checkpoints", () => {
-    const drafts = buildPlanNodeDrafts(
+  it("assigns contiguous stay dates across destination stops", () => {
+    const drafts = buildPlanDrafts(
       {
         title: "Europe",
         originCity: "Jakarta",
@@ -192,13 +189,13 @@ describe("persist-plan", () => {
       { originCity: "Jakarta", returnCity: "Jakarta", startDate: "2026-10-01", endDate: "2026-10-04" },
     );
 
-    const stays = drafts.filter((draft) => draft.checkpointKind === "STAY");
+    const stays = drafts.filter((draft) => draft.kind === "stay");
     assert.deepEqual(
       stays.map((draft) => ({
-        title: draft.title,
+        title: draft.name,
         start: draft.scheduleStart?.toISOString().slice(0, 10),
         end: draft.scheduleEnd?.toISOString().slice(0, 10),
-        days: (draft.content as { days?: number } | undefined)?.days,
+        days: draft.days,
       })),
       [
         { title: "London", start: "2026-10-01", end: "2026-10-02", days: 2 },

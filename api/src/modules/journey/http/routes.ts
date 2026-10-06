@@ -51,6 +51,12 @@ const planTripSchema = z.object({
   executeTools: z.boolean().optional(),
 });
 
+const planningMessageSchema = z.object({
+  text: z.string().min(1),
+  stopId: z.string().min(1).optional(),
+  answers: z.record(z.unknown()).optional(),
+});
+
 const listNodesQuery = z.object({
   parentId: z.string().optional(),
 });
@@ -152,7 +158,7 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           tags: ["Trips"],
           summary: "Plan a trip",
           description:
-            "Run the planner, persist pipeline nodes, and return the stops + catalog plan response.",
+            "Run the planner, persist stops and catalog rows, and return the stops + catalog plan response.",
           params: tripIdParams,
           paramsExample: { tripId: SAMPLE_TRIP_ID },
           body: planTripSchema,
@@ -178,6 +184,87 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
       },
     );
 
+    app.get<{ Params: { tripId: string } }>(
+      "/:tripId/planning",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Get planning chat",
+          description:
+            "Load the planning chat transcript and live skeleton draft. No provider APIs are called.",
+          params: tripIdParams,
+          paramsExample: { tripId: SAMPLE_TRIP_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const planning = await service.getPlanningChat(req.params.tripId, user.id);
+        return ok(reply, planning);
+      },
+    );
+
+    app.post<{ Params: { tripId: string } }>(
+      "/:tripId/planning/messages",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Send a planning chat message",
+          description:
+            "Append a user message, revise the live draft with the LLM only, and return the full chat state. Provider search is not run.",
+          params: tripIdParams,
+          paramsExample: { tripId: SAMPLE_TRIP_ID },
+          body: planningMessageSchema,
+          bodyExample: {
+            text: "7 hari Jepang, nuansa budaya, dari Jakarta, 1–7 November.",
+            stopId: "stay_tokyo",
+          },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const parsed = planningMessageSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const planning = await service.postPlanningMessage({
+          tripId: req.params.tripId,
+          userId: user.id,
+          ...parsed.data,
+        });
+        return ok(reply, planning);
+      },
+    );
+
+    app.post<{ Params: { tripId: string } }>(
+      "/:tripId/planning/search",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Search from locked planning draft",
+          description:
+            "Run provider search from the current planning draft (Mulai pencarian). Persists stops and catalog rows.",
+          params: tripIdParams,
+          paramsExample: { tripId: SAMPLE_TRIP_ID },
+          body: z.object({ context: toolContextSchema }).optional(),
+          bodyExample: { context: SAMPLE_TOOL_CONTEXT },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const context =
+          req.body && typeof req.body === "object" && "context" in req.body
+            ? (req.body as { context?: z.infer<typeof toolContextSchema> }).context
+            : undefined;
+        const result = await service.searchPlanningDraft({
+          tripId: req.params.tripId,
+          userId: user.id,
+          context,
+        });
+        return ok(reply, result);
+      },
+    );
+
     app.get<{
       Params: { tripId: string };
       Querystring: { parentId?: string };
@@ -187,7 +274,7 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
         schema: routeDocs({
           tags: ["Trips"],
           summary: "List trip nodes",
-          description: "List child pipeline nodes. Omit parentId for the trip root.",
+          description: "List child stops. Omit parentId for top-level journey stops.",
           params: tripIdParams,
           paramsExample: { tripId: SAMPLE_TRIP_ID },
           querystring: listNodesQuery,
@@ -213,7 +300,7 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
         schema: routeDocs({
           tags: ["Trips"],
           summary: "Add a trip node",
-          description: "Insert a custom pipeline node under a parent checkpoint.",
+          description: "Insert a custom stop under a parent stop or the journey.",
           params: tripIdParams,
           paramsExample: { tripId: SAMPLE_TRIP_ID },
           body: addNodeSchema,

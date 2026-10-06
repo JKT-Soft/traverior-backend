@@ -1,11 +1,23 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../infra/prisma/client.js";
 
-type CostDb = Pick<PrismaClient, "pipelineNode" | "trip">;
+type CostDb = Pick<PrismaClient, "stop" | "trip" | "budget">;
 
 export type TripRollup = {
   totalCostAmount: number;
   totalDurationMinutes: number;
+};
+
+type RollupStop = {
+  id: string;
+  parentStopId: string | null;
+  depth: number;
+  days: number | null;
+  bookings: Array<{
+    kind: string;
+    costAmount: unknown;
+    flight: { durationMinutes: number | null } | null;
+  }>;
 };
 
 function asNumber(value: unknown): number {
@@ -19,79 +31,114 @@ function asNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Deterministic cost/duration roll-up — never use LLM for these numbers */
+function ownCost(stop: RollupStop): number {
+  return stop.bookings.reduce((sum, booking) => sum + asNumber(booking.costAmount), 0);
+}
+
+function ownDuration(stop: RollupStop): number {
+  const stay = (stop.days ?? 0) * 24 * 60;
+  const flights = stop.bookings.reduce(
+    (sum, booking) => sum + (booking.flight?.durationMinutes ?? 0),
+    0,
+  );
+  return stay + flights;
+}
+
+/** Deterministic cost/duration roll-up from bookings and nested stops. */
 export class CostService {
   constructor(private readonly db: CostDb = defaultPrisma) {}
 
   async rollupTrip(tripId: string): Promise<TripRollup> {
-    const nodes = await this.db.pipelineNode.findMany({
-      where: { tripId, deletedAt: null },
-      select: {
-        id: true,
-        parentId: true,
-        costAmount: true,
-        durationMinutes: true,
-        depth: true,
-      },
-    });
+    const [trip, stops] = await Promise.all([
+      this.db.trip.findUnique({ where: { id: tripId }, select: { baseCurrency: true } }),
+      this.db.stop.findMany({
+        where: { journey: { tripId }, deletedAt: null },
+        select: {
+          id: true,
+          parentStopId: true,
+          depth: true,
+          days: true,
+          bookings: {
+            select: {
+              kind: true,
+              costAmount: true,
+              flight: { select: { durationMinutes: true } },
+            },
+          },
+        },
+      }),
+    ]);
 
-    if (nodes.length === 0) {
+    if (stops.length === 0) {
       return { totalCostAmount: 0, totalDurationMinutes: 0 };
     }
 
-    const ownCost = new Map(nodes.map((node) => [node.id, asNumber(node.costAmount)]));
-    const ownDuration = new Map(nodes.map((node) => [node.id, node.durationMinutes]));
-    const rolledCost = new Map(ownCost);
-    const rolledDuration = new Map(ownDuration);
-
-    const byParent = new Map<string | null, typeof nodes>();
-    for (const node of nodes) {
-      const list = byParent.get(node.parentId) ?? [];
-      list.push(node);
-      byParent.set(node.parentId, list);
+    const currency = trip?.baseCurrency ?? "IDR";
+    const rolledCost = new Map(stops.map((stop) => [stop.id, ownCost(stop)]));
+    const rolledDuration = new Map(stops.map((stop) => [stop.id, ownDuration(stop)]));
+    const byParent = new Map<string | null, typeof stops>();
+    for (const stop of stops) {
+      const list = byParent.get(stop.parentStopId) ?? [];
+      list.push(stop);
+      byParent.set(stop.parentStopId, list);
     }
 
-    const maxDepth = nodes.reduce((max, node) => Math.max(max, node.depth), 0);
+    const maxDepth = stops.reduce((max, stop) => Math.max(max, stop.depth), 0);
     for (let depth = maxDepth; depth >= 0; depth -= 1) {
-      const level = nodes.filter((node) => node.depth === depth);
-      for (const node of level) {
-        const children = byParent.get(node.id) ?? [];
-        const childCost = children.reduce((sum, child) => sum + (rolledCost.get(child.id) ?? 0), 0);
-        const childDuration = children.reduce((sum, child) => sum + (rolledDuration.get(child.id) ?? 0), 0);
-        const cost = (ownCost.get(node.id) ?? 0) + childCost;
-        const duration = (ownDuration.get(node.id) ?? 0) + childDuration;
-        rolledCost.set(node.id, cost);
-        rolledDuration.set(node.id, duration);
-
-        if (children.length === 0 && cost === asNumber(node.costAmount) && duration === node.durationMinutes) {
-          continue;
-        }
-
-        await this.db.pipelineNode.update({
-          where: { id: node.id },
-          data: {
-            costAmount: cost,
-            durationMinutes: duration,
-            costIsEstimate: true,
-          },
-        });
+      for (const stop of stops.filter((item) => item.depth === depth)) {
+        const children = byParent.get(stop.id) ?? [];
+        const cost =
+          (rolledCost.get(stop.id) ?? 0) +
+          children.reduce((sum, child) => sum + (rolledCost.get(child.id) ?? 0), 0);
+        const duration =
+          (rolledDuration.get(stop.id) ?? 0) +
+          children.reduce((sum, child) => sum + (rolledDuration.get(child.id) ?? 0), 0);
+        rolledCost.set(stop.id, cost);
+        rolledDuration.set(stop.id, duration);
       }
     }
 
-    const root = nodes.find((node) => node.parentId === null);
-    const totalCostAmount = root ? (rolledCost.get(root.id) ?? 0) : 0;
-    const totalDurationMinutes = root ? (rolledDuration.get(root.id) ?? 0) : 0;
+    await this.db.budget.deleteMany({
+      where: {
+        OR: [{ tripId }, { journey: { tripId } }, { stop: { journey: { tripId } } }],
+      },
+    });
 
-    if (root) {
-      await this.db.trip.update({
-        where: { id: tripId },
+    for (const stop of stops) {
+      await this.db.budget.create({
         data: {
-          totalCostAmount,
-          totalDurationMinutes,
-          totalCostIsEstimate: true,
+          stopId: stop.id,
+          scope: "stop",
+          category: "total",
+          amount: rolledCost.get(stop.id) ?? 0,
+          currency,
+          isEstimate: true,
         },
       });
     }
+
+    const roots = stops.filter((stop) => stop.parentStopId == null);
+    const totalCostAmount = roots.reduce((sum, stop) => sum + (rolledCost.get(stop.id) ?? 0), 0);
+    const totalDurationMinutes = roots.reduce((sum, stop) => sum + (rolledDuration.get(stop.id) ?? 0), 0);
+
+    await this.db.budget.create({
+      data: {
+        tripId,
+        scope: "trip",
+        category: "total",
+        amount: totalCostAmount,
+        currency,
+        isEstimate: true,
+      },
+    });
+    await this.db.trip.update({
+      where: { id: tripId },
+      data: {
+        totalCostAmount,
+        totalDurationMinutes,
+        totalCostIsEstimate: true,
+      },
+    });
 
     return { totalCostAmount, totalDurationMinutes };
   }
