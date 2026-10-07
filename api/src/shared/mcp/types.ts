@@ -1,3 +1,4 @@
+import type { ChecklistResult } from "../../modules/checklist/domain/ports.js";
 import type { CheckpointNeed } from "../../modules/planner/domain/skeleton.js";
 
 export type McpServerId =
@@ -90,7 +91,7 @@ export type McpDomainServices = {
       destination: string;
       passportCountry?: string;
       visaDocuments?: string[];
-    }) => Promise<unknown>;
+    }) => Promise<ChecklistResult>;
     providerName: string;
   };
 };
