@@ -22,7 +22,7 @@ src/
 │   └── policy/           # lock/custom AI rules
 └── shared/
     ├── http/             # Fastify app + reply helpers
-    ├── logging/          # pino file logger (logs/app.log, logs/error.log)
+    ├── logging/          # pino file logger (logs/YYYY-MM-DD/app.log)
     └── cache/            # Redis / memory cache-aside for providers
 ```
 
@@ -69,8 +69,10 @@ Request/error logs go to console and files (JSON lines):
 
 | File | Contents |
 |------|----------|
-| `logs/app.log` | info+ (requests, errors) |
-| `logs/error.log` | warn+ and errors only |
+| `logs/YYYY-MM-DD/app.log` | info+ (requests, errors) |
+| `logs/YYYY-MM-DD/error.log` | warn+ and errors only |
+
+Folder tanggal memakai zona waktu server (hari berganti = file baru, termasuk jika proses jalan melewati tengah malam).
 
 ```env
 LOG_DIR=logs

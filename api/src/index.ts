@@ -15,7 +15,7 @@ async function main() {
     }`,
   );
   console.log(`[traverior-api] providers`, env.providers);
-  console.log(`[traverior-api] logs → ${env.logDir}/app.log , ${env.logDir}/error.log`);
+  console.log(`[traverior-api] logs → ${env.logDir}/YYYY-MM-DD/{app,error}.log`);
   console.log(
     `[traverior-api] cache store=${container.cache.name} enabled=${env.cache.enabled}`,
   );
