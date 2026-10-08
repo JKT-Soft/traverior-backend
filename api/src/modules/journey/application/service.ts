@@ -2,7 +2,12 @@ import type { Prisma, PrismaClient, StopKind } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../../infra/prisma/client.js";
 import type { CacheStore } from "../../../shared/cache/index.js";
 import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
-import { NotFoundError, PlanNeedsInputError, ValidationError } from "../../../shared/http/errors.js";
+import {
+  AppError,
+  NotFoundError,
+  PlanNeedsInputError,
+  ValidationError,
+} from "../../../shared/http/errors.js";
 import {
   ApplicationLogService,
   type ApplicationLogDb,
@@ -315,6 +320,50 @@ export class JourneyService {
       },
     });
 
+    try {
+      return await this.continuePlanningAfterUserMessage({
+        tripId: input.tripId,
+        userId: input.userId,
+        text,
+        stopId: input.stopId,
+        answers: input.answers,
+        trip,
+        existingDraft,
+        existingMessages,
+        nextPosition,
+        liveDraft,
+        preferences,
+      });
+    } catch (err) {
+      const body = planningAssistantErrorMessage(err);
+      await this.appendPlanningAssistantError({
+        tripId: input.tripId,
+        userId: input.userId,
+        body,
+      });
+      return this.getPlanningChat(input.tripId, input.userId);
+    }
+  }
+
+  private async continuePlanningAfterUserMessage(input: {
+    tripId: string;
+    userId: string;
+    text: string;
+    stopId?: string;
+    answers?: Record<string, unknown>;
+    trip: {
+      originCity: string | null;
+      destinationSummary: string | null;
+    };
+    existingDraft: Awaited<ReturnType<JourneyDb["planningDraft"]["findUnique"]>>;
+    existingMessages: Awaited<ReturnType<JourneyDb["planningMessage"]["findMany"]>>;
+    nextPosition: number;
+    liveDraft: ReturnType<typeof emptyDraftCard>;
+    preferences: PlanSkeletonInput["preferences"];
+  }): Promise<PlanningChatState> {
+    if (!this.planner) throw new ValidationError("Planner is not configured");
+
+    let liveDraft = input.liveDraft;
     let assistantMessages: Array<{
       role: "assistant";
       kind: "text" | "skeleton" | "clarification";
@@ -328,8 +377,9 @@ export class JourneyService {
     );
 
     if (!hasDraftStops) {
+      const preferences = input.preferences ?? {};
       const slots = await this.planner.extractPlanSlots({
-        prompt: text,
+        prompt: input.text,
         preferences,
       });
       const mergedPreferences = mergeExtractedPreferences(preferences, slots.extracted);
@@ -377,7 +427,7 @@ export class JourneyService {
         await this.persistPlanningTurn({
           tripId: input.tripId,
           userId: input.userId,
-          startPosition: nextPosition + 1,
+          startPosition: input.nextPosition + 1,
           draft: liveDraft,
           phase: "collecting",
           tripPatch: tripUpdateFromDraft(liveDraft),
@@ -387,9 +437,9 @@ export class JourneyService {
       }
 
       const { skeleton } = await this.planner.planSkeleton(
-        { prompt: text, preferences: mergedPreferences },
+        { prompt: input.text, preferences: mergedPreferences },
         {
-          tripOriginCity: trip.originCity,
+          tripOriginCity: input.trip.originCity,
           preferences: mergedPreferences,
         },
         { tripId: input.tripId, userId: input.userId },
@@ -412,7 +462,7 @@ export class JourneyService {
       await this.persistPlanningTurn({
         tripId: input.tripId,
         userId: input.userId,
-        startPosition: nextPosition + 1,
+        startPosition: input.nextPosition + 1,
         draft: nextDraft,
         phase: "draft",
         tripPatch: tripUpdateFromDraft(nextDraft),
@@ -421,22 +471,23 @@ export class JourneyService {
       return this.getPlanningChat(input.tripId, input.userId);
     }
 
-    const history = textHistoryFromMessages(existingMessages);
+    const history = textHistoryFromMessages(input.existingMessages);
     const revision = await this.planner.revisePlanningDraft({
       history,
       currentDraft: liveDraft,
-      latestMessage: text,
+      latestMessage: input.text,
       stopId: input.stopId,
-      preferences,
+      preferences: input.preferences,
       normalizeOptions: {
-        tripOriginCity: trip.originCity,
-        preferences,
+        tripOriginCity: input.trip.originCity,
+        preferences: input.preferences,
       },
       logContext: { tripId: input.tripId, userId: input.userId },
     });
 
     let nextDraft = liveDraft;
-    let phase: "collecting" | "draft" = existingDraft?.phase === "collecting" ? "collecting" : "draft";
+    let phase: "collecting" | "draft" =
+      input.existingDraft?.phase === "collecting" ? "collecting" : "draft";
     assistantMessages = [{ role: "assistant", kind: "text", body: revision.reply }];
 
     if (revision.clarifications.length > 0) {
@@ -468,13 +519,37 @@ export class JourneyService {
     await this.persistPlanningTurn({
       tripId: input.tripId,
       userId: input.userId,
-      startPosition: nextPosition + 1,
+      startPosition: input.nextPosition + 1,
       draft: nextDraft,
       phase,
       tripPatch: tripUpdateFromDraft(nextDraft),
       assistantMessages,
     });
     return this.getPlanningChat(input.tripId, input.userId);
+  }
+
+  private async appendPlanningAssistantError(input: {
+    tripId: string;
+    userId: string;
+    body: string;
+  }) {
+    const latest = await this.db.planningMessage.findFirst({
+      where: { tripId: input.tripId },
+      orderBy: { position: "desc" },
+      select: { position: true },
+    });
+    const position = (latest?.position ?? -1) + 1;
+    await this.db.planningMessage.create({
+      data: {
+        id: randomUUID(),
+        tripId: input.tripId,
+        position,
+        role: "assistant",
+        kind: "text",
+        body: input.body,
+      },
+    });
+    await this.invalidateUserTrips(input.userId, input.tripId);
   }
 
   /**
@@ -1137,6 +1212,26 @@ export class JourneyService {
       }
     }
   }
+}
+
+function planningAssistantErrorMessage(err: unknown): string {
+  const code = err instanceof AppError ? err.code : undefined;
+
+  switch (code) {
+    case "LLM_UPSTREAM_ERROR":
+    case "LLM_INVALID_JSON":
+    case "LLM_INVALID_SKELETON":
+    case "LLM_INVALID_SLOTS":
+      return "Maaf, saya belum bisa menyusun rancangan dari pesan itu. Coba tulis ulang dengan lebih jelas, atau kirim lagi sebentar.";
+    case "VALIDATION_ERROR":
+      return "Maaf, saya belum bisa memproses pesan itu. Coba perjelas tujuan, tanggal, atau ubah sedikit teksnya.";
+    case "PLAN_NEEDS_INPUT":
+      return "Ada beberapa detail yang masih kurang. Boleh lengkapi dulu, lalu kita lanjutkan rancangannya.";
+    default:
+      break;
+  }
+
+  return "Maaf, terjadi gangguan saat menyusun balasan. Silakan coba kirim pesan lagi.";
 }
 
 function dayOrUndefined(value: string | undefined): Date | undefined {
