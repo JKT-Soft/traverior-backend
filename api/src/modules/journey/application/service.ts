@@ -335,6 +335,20 @@ export class JourneyService {
         preferences,
       });
     } catch (err) {
+      const debug = formatPlanningErrorDebug(err);
+      console.error("[traverior-api:planning/messages] failed", {
+        tripId: input.tripId,
+        userId: input.userId,
+        stopId: input.stopId ?? null,
+        textPreview: text.length > 160 ? `${text.slice(0, 160)}…` : text,
+        hasExistingDraft: Boolean(existingDraft),
+        draftStopCount: liveDraft.stops.length,
+        messageCount: existingMessages.length,
+        ...debug,
+      });
+      if (debug.stack) {
+        console.error("[traverior-api:planning/messages] stack\n", debug.stack);
+      }
       const body = planningAssistantErrorMessage(err);
       await this.appendPlanningAssistantError({
         tripId: input.tripId,
@@ -1212,6 +1226,38 @@ export class JourneyService {
       }
     }
   }
+}
+
+function formatPlanningErrorDebug(err: unknown): {
+  name: string;
+  message: string;
+  code?: string;
+  status?: number;
+  details?: unknown;
+  stack?: string;
+} {
+  if (err instanceof AppError) {
+    return {
+      name: err.name,
+      message: err.message,
+      code: err.code,
+      status: err.status,
+      details: err.details,
+      stack: err.stack,
+    };
+  }
+  if (err instanceof Error) {
+    const maybe = err as Error & { code?: string; statusCode?: number; details?: unknown };
+    return {
+      name: err.name,
+      message: err.message,
+      code: maybe.code,
+      status: maybe.statusCode,
+      details: maybe.details,
+      stack: err.stack,
+    };
+  }
+  return { name: "UnknownError", message: String(err) };
 }
 
 function planningAssistantErrorMessage(err: unknown): string {

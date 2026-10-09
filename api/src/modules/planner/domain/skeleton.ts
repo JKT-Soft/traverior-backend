@@ -40,18 +40,35 @@ export const SkeletonCheckpointSchema = z.object({
   notes: z.string().optional(),
 });
 
+const optionalString = z.string().nullish().transform((v) => v ?? undefined);
+const optionalIata = z
+  .string()
+  .regex(/^[A-Za-z]{3}$/)
+  .nullish()
+  .transform((v) => v ?? undefined);
+
 export const TripSkeletonSchema = z.object({
   title: z.string().min(1),
-  summary: z.string().optional(),
-  concept: PlanningConceptSchema.optional(),
-  tone: z.string().optional(),
-  originCity: z.string().optional(),
-  originIata: z.string().regex(/^[A-Za-z]{3}$/).optional(),
-  destinationSummary: z.string().optional(),
-  assumedStartDate: z.string().optional(),
-  assumedEndDate: z.string().optional(),
-  partySize: z.number().int().positive().max(20).optional(),
-  budgetTone: z.enum(["budget", "mid", "luxury"]).optional(),
+  summary: optionalString,
+  concept: PlanningConceptSchema.nullish().transform((v) => v ?? undefined),
+  tone: optionalString,
+  originCity: optionalString,
+  originIata: optionalIata,
+  destinationSummary: optionalString,
+  assumedStartDate: optionalString,
+  assumedEndDate: optionalString,
+  // LLMs often emit JSON null for unknown optional fields; Zod `.optional()` rejects null.
+  partySize: z
+    .number()
+    .int()
+    .positive()
+    .max(20)
+    .nullish()
+    .transform((v) => v ?? undefined),
+  budgetTone: z
+    .enum(["budget", "mid", "luxury"])
+    .nullish()
+    .transform((v) => v ?? undefined),
   checkpoints: z.array(SkeletonCheckpointSchema).min(1).max(12),
 });
 

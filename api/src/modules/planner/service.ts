@@ -115,12 +115,23 @@ export class PlannerService {
     let parsed: unknown;
     try {
       parsed = JSON.parse(stripCodeFence(raw));
-    } catch {
+    } catch (parseErr) {
+      console.error("[traverior-api:planner] extractPlanSlots invalid JSON", {
+        llm: this.deps.llm.name,
+        parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        rawPreview: raw.length > 600 ? `${raw.slice(0, 600)}…` : raw,
+      });
       throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
     }
 
     const slots = SlotExtractionSchema.safeParse(parsed);
     if (!slots.success) {
+      console.error("[traverior-api:planner] extractPlanSlots schema failed", {
+        llm: this.deps.llm.name,
+        issue: slots.error.issues[0]?.message,
+        path: slots.error.issues[0]?.path,
+        parsed,
+      });
       throw new AppError(
         502,
         `LLM slot extraction failed validation: ${slots.error.issues[0]?.message ?? "invalid"}`,
@@ -161,12 +172,25 @@ export class PlannerService {
     let parsed: unknown;
     try {
       parsed = JSON.parse(stripCodeFence(raw));
-    } catch {
+    } catch (parseErr) {
+      console.error("[traverior-api:planner] planSkeleton invalid JSON", {
+        llm: this.deps.llm.name,
+        tripId: logContext.tripId,
+        parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        rawPreview: raw.length > 600 ? `${raw.slice(0, 600)}…` : raw,
+      });
       throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
     }
 
     const skeleton = TripSkeletonSchema.safeParse(parsed);
     if (!skeleton.success) {
+      console.error("[traverior-api:planner] planSkeleton schema failed", {
+        llm: this.deps.llm.name,
+        tripId: logContext.tripId,
+        issue: skeleton.error.issues[0]?.message,
+        path: skeleton.error.issues[0]?.path,
+        parsed,
+      });
       throw new AppError(
         502,
         `LLM skeleton failed validation: ${skeleton.error.issues[0]?.message ?? "invalid"}`,
@@ -271,12 +295,25 @@ export class PlannerService {
     let parsed: unknown;
     try {
       parsed = JSON.parse(stripCodeFence(raw));
-    } catch {
+    } catch (parseErr) {
+      console.error("[traverior-api:planner] revisePlanningDraft invalid JSON", {
+        llm: this.deps.llm.name,
+        tripId: input.logContext?.tripId,
+        parseError: parseErr instanceof Error ? parseErr.message : String(parseErr),
+        rawPreview: raw.length > 600 ? `${raw.slice(0, 600)}…` : raw,
+      });
       throw new AppError(502, "LLM returned invalid JSON", "LLM_INVALID_JSON");
     }
 
     const result = ReviseDraftResponseSchema.safeParse(parsed);
     if (!result.success) {
+      console.error("[traverior-api:planner] revisePlanningDraft schema failed", {
+        llm: this.deps.llm.name,
+        tripId: input.logContext?.tripId,
+        issue: result.error.issues[0]?.message,
+        path: result.error.issues[0]?.path,
+        parsed,
+      });
       throw new AppError(
         502,
         `LLM revise draft failed validation: ${result.error.issues[0]?.message ?? "invalid"}`,

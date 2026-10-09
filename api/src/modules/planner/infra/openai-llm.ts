@@ -48,10 +48,21 @@ export class OpenAiLlmClient implements LlmClient {
     try {
       body = JSON.parse(raw) as OpenAiChatResponse;
     } catch {
+      console.error("[traverior-api:openai] non-JSON response", {
+        status: res.status,
+        model: this.model,
+        bodyPreview: raw.length > 400 ? `${raw.slice(0, 400)}…` : raw,
+      });
       throw new AppError(502, `OpenAI returned non-JSON (${res.status})`, "LLM_UPSTREAM_ERROR");
     }
 
     if (!res.ok) {
+      console.error("[traverior-api:openai] upstream error", {
+        status: res.status,
+        model: this.model,
+        message: body.error?.message ?? `OpenAI error ${res.status}`,
+        bodyPreview: raw.length > 400 ? `${raw.slice(0, 400)}…` : raw,
+      });
       throw new AppError(
         502,
         body.error?.message ?? `OpenAI error ${res.status}`,
@@ -61,6 +72,11 @@ export class OpenAiLlmClient implements LlmClient {
 
     const content = body.choices?.[0]?.message?.content?.trim();
     if (!content) {
+      console.error("[traverior-api:openai] empty content", {
+        status: res.status,
+        model: this.model,
+        bodyPreview: raw.length > 400 ? `${raw.slice(0, 400)}…` : raw,
+      });
       throw new AppError(502, "OpenAI returned empty content", "LLM_UPSTREAM_ERROR");
     }
     return content;
