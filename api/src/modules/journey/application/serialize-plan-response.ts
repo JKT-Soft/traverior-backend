@@ -240,7 +240,14 @@ export function serializePlanResponse(input: {
         catalog.visas[id] = { ...content, id, nodeId: booking.id, title: "Visa", cost };
       } else if (booking.kind === "checklist") {
         const id = `chk_${citySlug}_${++checklistNo}`;
-        catalog.checklists[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Travel checklist"), cost };
+        catalog.checklists[id] = {
+          ...content,
+          catalogId: row?.id ?? null,
+          id,
+          nodeId: booking.id,
+          title: textTitle(row, "Travel checklist"),
+          cost,
+        };
       }
     }
 

@@ -769,6 +769,53 @@ export class JourneyService {
   }
 
   /**
+   * Toggle / update a single checklist item inside `catalog_checklists.items` JSON.
+   * One catalog row holds the whole checklist; items stay nested (not one-row-per-item).
+   */
+  async updateChecklistItem(input: {
+    tripId: string;
+    userId: string;
+    checklistId: string;
+    itemId: string;
+    done: boolean;
+  }) {
+    const trip = await this.db.trip.findFirst({
+      where: { id: input.tripId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+
+    const checklist = await this.db.catalogChecklist.findFirst({
+      where: { id: input.checklistId, tripId: input.tripId },
+    });
+    if (!checklist) throw new NotFoundError("Checklist not found");
+
+    const items = normalizeChecklistItems(checklist.items);
+    const index = items.findIndex((item) => item.id === input.itemId);
+    if (index < 0) throw new NotFoundError("Checklist item not found");
+
+    const nextItems = items.map((item, i) =>
+      i === index ? { ...item, done: input.done } : item,
+    );
+
+    const updated = await this.db.catalogChecklist.update({
+      where: { id: checklist.id },
+      data: { items: nextItems as Prisma.InputJsonValue },
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId);
+
+    return {
+      id: updated.id,
+      tripId: updated.tripId,
+      title: updated.title,
+      provider: updated.provider,
+      items: normalizeChecklistItems(updated.items),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+  }
+
+  /**
    * Full plan flow: LLM skeleton → MCP tools → persist stops and catalog → cost roll-up.
    * Pass `skeleton` to skip slot extraction / skeleton LLM (used by planning chat search).
    */
@@ -1226,6 +1273,44 @@ export class JourneyService {
       }
     }
   }
+}
+
+type StoredChecklistItem = {
+  id: string;
+  label: string;
+  done: boolean;
+  source: "template" | "visa" | "user";
+};
+
+function normalizeChecklistItems(raw: unknown): StoredChecklistItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: StoredChecklistItem[] = [];
+  for (const [index, entry] of raw.entries()) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const row = entry as Record<string, unknown>;
+    const label =
+      typeof row.label === "string" && row.label.trim().length > 0
+        ? row.label.trim()
+        : typeof row.title === "string" && row.title.trim().length > 0
+          ? row.title.trim()
+          : null;
+    if (!label) continue;
+    const id =
+      typeof row.id === "string" && row.id.trim().length > 0
+        ? row.id.trim()
+        : `item_${index + 1}`;
+    const source =
+      row.source === "visa" || row.source === "user" || row.source === "template"
+        ? row.source
+        : "template";
+    items.push({
+      id,
+      label,
+      done: Boolean(row.done),
+      source,
+    });
+  }
+  return items;
 }
 
 function formatPlanningErrorDebug(err: unknown): {

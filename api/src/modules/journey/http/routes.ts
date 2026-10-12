@@ -4,6 +4,8 @@ import { requireUser } from "../../auth/require-user.js";
 import { ValidationError } from "../../../shared/http/errors.js";
 import { routeDocs } from "../../../shared/http/openapi.js";
 import {
+  SAMPLE_CHECKLIST_ID,
+  SAMPLE_CHECKLIST_ITEM_ID,
   SAMPLE_DATES,
   SAMPLE_JAKARTA,
   SAMPLE_NODE_ID,
@@ -59,6 +61,16 @@ const planningMessageSchema = z.object({
 
 const listNodesQuery = z.object({
   parentId: z.string().optional(),
+});
+
+const checklistItemParams = z.object({
+  tripId: z.string().uuid(),
+  checklistId: z.string().uuid(),
+  itemId: z.string().min(1),
+});
+
+const updateChecklistItemSchema = z.object({
+  done: z.boolean(),
 });
 
 const addNodeSchema = z.object({
@@ -333,6 +345,44 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           isCustom: true,
         });
         return ok(reply, { node }, 201);
+      },
+    );
+
+    app.patch<{
+      Params: { tripId: string; checklistId: string; itemId: string };
+    }>(
+      "/:tripId/checklists/:checklistId/items/:itemId",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Update checklist item",
+          description:
+            "Toggle done on one checklist item inside catalog_checklists.items JSON for the trip.",
+          params: checklistItemParams,
+          paramsExample: {
+            tripId: SAMPLE_TRIP_ID,
+            checklistId: SAMPLE_CHECKLIST_ID,
+            itemId: SAMPLE_CHECKLIST_ITEM_ID,
+          },
+          body: updateChecklistItemSchema,
+          bodyExample: { done: true },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = checklistItemParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const body = updateChecklistItemSchema.safeParse(req.body);
+        if (!body.success) throw new ValidationError("Invalid body");
+        const checklist = await service.updateChecklistItem({
+          tripId: params.data.tripId,
+          userId: user.id,
+          checklistId: params.data.checklistId,
+          itemId: params.data.itemId,
+          done: body.data.done,
+        });
+        return ok(reply, { checklist });
       },
     );
   };
