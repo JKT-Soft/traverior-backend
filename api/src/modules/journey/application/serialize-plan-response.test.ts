@@ -68,10 +68,35 @@ describe("serializePlanResponse", () => {
                   kind: "hotel",
                   hotel: { id: "hotel-row", name: "Tokyo Hotel", raw: { name: "Tokyo Hotel" } },
                 },
+                {
+                  id: "checklist-booking",
+                  kind: "checklist",
+                  checklist: {
+                    id: "44444444-4444-4444-8444-444444444444",
+                    title: "Travel checklist",
+                    items: [
+                      { id: "passport", label: "Passport", done: false, source: "template" },
+                    ],
+                    raw: {
+                      checklist: {
+                        items: [
+                          { id: "passport", label: "Passport", done: false, source: "template" },
+                        ],
+                      },
+                    },
+                  },
+                },
               ],
             },
           ],
         },
+        checklists: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            title: "Travel checklist",
+            items: [{ id: "passport", label: "Passport", done: false, source: "template" }],
+          },
+        ],
       },
     });
 
@@ -83,6 +108,11 @@ describe("serializePlanResponse", () => {
     );
     assert.equal(Object.keys(response.catalog.flights).length, 1);
     assert.equal(Object.keys(response.catalog.hotels).length, 1);
+    assert.equal(Object.keys(response.catalog.checklists).length, 1);
+    const checklist = Object.values(response.catalog.checklists)[0]!;
+    assert.equal(checklist.catalogId, "44444444-4444-4444-8444-444444444444");
+    assert.ok(Array.isArray(checklist.items));
+    assert.equal((checklist.items as unknown[]).length, 1);
     assert.equal(response.meta.schema, "trip+journey.stops+catalog");
     assert.equal(response.meta.llm, "mock-llm");
     assert.equal((response.trip as { nodes?: unknown }).nodes, undefined);

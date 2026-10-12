@@ -80,6 +80,8 @@ type StoredTrip = {
   coverImageUrl?: string | null;
   planningVersion?: number;
   lastPlannedAt?: unknown;
+  /** Trip-scoped catalog rows (fallback when booking links are missing). */
+  checklists?: CatalogRow[] | null;
   journey?: {
     id?: string | null;
     name?: string | null;
@@ -137,7 +139,22 @@ function catalogPayload(row: CatalogRow | null | undefined): Record<string, unkn
   const raw = record(row.raw);
   const rest: Record<string, unknown> = { ...row };
   delete rest.raw;
-  return { ...raw, ...rest };
+  const merged: Record<string, unknown> = { ...raw, ...rest };
+
+  // MCP wraps items under `checklist.items`; row.items can be empty if write path missed them.
+  const nested = record(raw.checklist);
+  const fromRow = Array.isArray(rest.items) ? (rest.items as unknown[]) : [];
+  const fromNested = Array.isArray(nested.items) ? (nested.items as unknown[]) : [];
+  const fromRaw = Array.isArray(raw.items) ? (raw.items as unknown[]) : [];
+  const items = fromRow.length > 0 ? fromRow : fromNested.length > 0 ? fromNested : fromRaw;
+  if (items.length > 0) merged.items = items;
+
+  return merged;
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function rowFor(booking: StoredBooking): CatalogRow | null {
@@ -303,6 +320,27 @@ export function serializePlanResponse(input: {
   });
 
   shareFlightIds(stops);
+
+  // Ensure catalog_checklists rows always appear even if booking.checklist link is missing.
+  const seenChecklistIds = new Set<string>();
+  for (const entry of Object.values(catalog.checklists)) {
+    const catalogId = entry.catalogId;
+    if (isUuid(catalogId)) seenChecklistIds.add(catalogId);
+    if (isUuid(entry.id)) seenChecklistIds.add(entry.id as string);
+  }
+  for (const row of trip.checklists ?? []) {
+    if (!row?.id || seenChecklistIds.has(row.id)) continue;
+    const id = `chk_trip_${++checklistNo}`;
+    const content = catalogPayload(row);
+    catalog.checklists[id] = {
+      ...content,
+      catalogId: row.id,
+      id,
+      title: textTitle(row, "Travel checklist"),
+      cost: budgetFrom(0, currency, true, currency),
+    };
+    seenChecklistIds.add(row.id);
+  }
 
   return {
     trip: {

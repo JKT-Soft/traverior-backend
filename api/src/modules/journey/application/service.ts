@@ -130,6 +130,7 @@ const tripGraphInclude = {
       },
     },
   },
+  checklists: true,
 } satisfies Prisma.TripInclude;
 
 export class JourneyService {
@@ -1242,15 +1243,15 @@ export class JourneyService {
   }
 
   private listKey(userId: string) {
-    return cacheKey("trips:list", { userId, v: 3 });
+    return cacheKey("trips:list", { userId, v: 4 });
   }
 
   private tripKey(tripId: string, userId: string) {
-    return cacheKey("trips:get", { tripId, userId, v: 3 });
+    return cacheKey("trips:get", { tripId, userId, v: 4 });
   }
 
   private childrenKey(tripId: string, userId: string, parentId: string | null) {
-    return cacheKey("trips:children", { tripId, userId, parentId, v: 3 });
+    return cacheKey("trips:children", { tripId, userId, parentId, v: 4 });
   }
 
   private async invalidateUserTrips(
