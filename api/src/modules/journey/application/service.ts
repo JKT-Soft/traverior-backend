@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, StopKind } from "@prisma/client";
+import type { EditAction, Prisma, PrismaClient, StopKind, StopStatus } from "@prisma/client";
 import { prisma as defaultPrisma } from "../../../infra/prisma/client.js";
 import type { CacheStore } from "../../../shared/cache/index.js";
 import { cacheKey, getOrSet } from "../../../shared/cache/index.js";
@@ -99,7 +99,9 @@ type JourneyDb = Pick<
   | "planningMessage"
   | "$transaction"
 > &
-  ApplicationLogDb;
+  ApplicationLogDb & {
+    stopEditLog?: PrismaClient["stopEditLog"];
+  };
 
 const stopGraphInclude = {
   bookings: {
@@ -769,6 +771,255 @@ export class JourneyService {
     return stopAsNode(stop, journey.id);
   }
 
+  async updateNode(input: {
+    tripId: string;
+    userId: string;
+    nodeId: string;
+    title?: string;
+    subtitle?: string | null;
+    status?: StopStatus;
+    isLocked?: boolean;
+    scheduleStart?: string | null;
+    scheduleEnd?: string | null;
+    dateStart?: string | null;
+    dateEnd?: string | null;
+    locationLabel?: string | null;
+    locationLat?: number | null;
+    locationLng?: number | null;
+    days?: number | null;
+  }) {
+    const trip = await this.getTrip(input.tripId, input.userId);
+    const journey = trip.journey;
+    if (!journey?.id) throw new ValidationError("Trip journey missing");
+
+    const existing = await this.db.stop.findFirst({
+      where: {
+        id: input.nodeId,
+        journeyId: journey.id,
+        deletedAt: null,
+      },
+    });
+    if (!existing) {
+      throw new NotFoundError("Node not found in trip");
+    }
+
+    const beforeData = {
+      name: existing.name,
+      subtitle: existing.subtitle,
+      status: existing.status,
+      isLocked: existing.isLocked,
+      scheduleStart: existing.scheduleStart,
+      scheduleEnd: existing.scheduleEnd,
+      dateStart: existing.dateStart,
+      dateEnd: existing.dateEnd,
+      locationLabel: existing.locationLabel,
+      locationLat: existing.locationLat,
+      locationLng: existing.locationLng,
+      days: existing.days,
+    };
+
+    const action: EditAction =
+      input.isLocked !== undefined && input.isLocked !== existing.isLocked
+        ? input.isLocked
+          ? "lock"
+          : "unlock"
+        : "edit";
+
+    const updated = await this.db.stop.update({
+      where: { id: existing.id },
+      data: {
+        name: input.title !== undefined ? input.title : undefined,
+        subtitle: input.subtitle !== undefined ? input.subtitle : undefined,
+        status: input.status !== undefined ? input.status : undefined,
+        isLocked: input.isLocked !== undefined ? input.isLocked : undefined,
+        scheduleStart:
+          input.scheduleStart !== undefined
+            ? input.scheduleStart
+              ? new Date(input.scheduleStart)
+              : null
+            : undefined,
+        scheduleEnd:
+          input.scheduleEnd !== undefined
+            ? input.scheduleEnd
+              ? new Date(input.scheduleEnd)
+              : null
+            : undefined,
+        dateStart:
+          input.dateStart !== undefined ? dayOrUndefined(input.dateStart ?? undefined) ?? null : undefined,
+        dateEnd:
+          input.dateEnd !== undefined ? dayOrUndefined(input.dateEnd ?? undefined) ?? null : undefined,
+        locationLabel: input.locationLabel !== undefined ? input.locationLabel : undefined,
+        locationLat: input.locationLat !== undefined ? input.locationLat : undefined,
+        locationLng: input.locationLng !== undefined ? input.locationLng : undefined,
+        days: input.days !== undefined ? input.days : undefined,
+        version: { increment: 1 },
+      },
+    });
+
+    try {
+      await this.db.stopEditLog?.create?.({
+        data: {
+          tripId: trip.id,
+          stopId: existing.id,
+          userId: trip.userId,
+          action,
+          before: beforeData as Prisma.InputJsonValue,
+          after: {
+            name: updated.name,
+            subtitle: updated.subtitle,
+            status: updated.status,
+            isLocked: updated.isLocked,
+            scheduleStart: updated.scheduleStart,
+            scheduleEnd: updated.scheduleEnd,
+            dateStart: updated.dateStart,
+            dateEnd: updated.dateEnd,
+            locationLabel: updated.locationLabel,
+            locationLat: updated.locationLat,
+            locationLng: updated.locationLng,
+            days: updated.days,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+      // non-fatal
+    }
+
+    await this.invalidateUserTrips(input.userId, input.tripId, existing.parentStopId);
+    return stopAsNode(updated, journey.id);
+  }
+
+  async setNodeLock(input: {
+    tripId: string;
+    userId: string;
+    nodeId: string;
+    isLocked: boolean;
+  }) {
+    return this.updateNode({
+      tripId: input.tripId,
+      userId: input.userId,
+      nodeId: input.nodeId,
+      isLocked: input.isLocked,
+    });
+  }
+
+  async deleteNode(input: {
+    tripId: string;
+    userId: string;
+    nodeId: string;
+  }) {
+    const trip = await this.getTrip(input.tripId, input.userId);
+    const journey = trip.journey;
+    if (!journey?.id) throw new ValidationError("Trip journey missing");
+
+    const existing = await this.db.stop.findFirst({
+      where: {
+        id: input.nodeId,
+        journeyId: journey.id,
+        deletedAt: null,
+      },
+    });
+    if (!existing) {
+      throw new NotFoundError("Node not found in trip");
+    }
+
+    const now = new Date();
+    await this.db.stop.update({
+      where: { id: existing.id },
+      data: {
+        deletedAt: now,
+        suppressAiRestore: true,
+      },
+    });
+
+    await this.db.stop.updateMany({
+      where: {
+        journeyId: journey.id,
+        path: { startsWith: `${existing.path}/` },
+        deletedAt: null,
+      },
+      data: {
+        deletedAt: now,
+        suppressAiRestore: true,
+      },
+    });
+
+    try {
+      await this.db.stopEditLog?.create?.({
+        data: {
+          tripId: trip.id,
+          stopId: existing.id,
+          userId: trip.userId,
+          action: "delete",
+          before: {
+            id: existing.id,
+            name: existing.name,
+            path: existing.path,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    } catch {
+      // non-fatal
+    }
+
+    await this.invalidateUserTrips(input.userId, input.tripId, existing.parentStopId);
+    return { success: true, id: existing.id };
+  }
+
+  async reorderNodes(input: {
+    tripId: string;
+    userId: string;
+    parentId?: string | null;
+    nodeIds: string[];
+  }) {
+    const trip = await this.getTrip(input.tripId, input.userId);
+    const journey = trip.journey;
+    if (!journey?.id) throw new ValidationError("Trip journey missing");
+
+    const stops = await this.db.stop.findMany({
+      where: {
+        id: { in: input.nodeIds },
+        journeyId: journey.id,
+        deletedAt: null,
+      },
+    });
+
+    if (stops.length !== input.nodeIds.length) {
+      throw new ValidationError("Some node IDs are invalid or not found in trip");
+    }
+
+    await this.db.$transaction(async (tx: Prisma.TransactionClient) => {
+      const stopTx = tx?.stop ?? this.db.stop;
+      for (const [index, id] of input.nodeIds.entries()) {
+        await stopTx.update({
+          where: { id },
+          data: { sortOrder: index },
+        });
+      }
+      if (stops[0]) {
+        try {
+          const editLogTx =
+            (tx as { stopEditLog?: PrismaClient["stopEditLog"] })?.stopEditLog ??
+            this.db.stopEditLog;
+          await editLogTx?.create?.({
+            data: {
+              tripId: trip.id,
+              stopId: stops[0].id,
+              userId: trip.userId,
+              action: "reorder",
+              after: { nodeIds: input.nodeIds } as Prisma.InputJsonValue,
+            },
+          });
+        } catch {
+          // non-fatal
+        }
+      }
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId, input.parentId ?? null);
+    return { success: true };
+  }
+
+
   /**
    * Toggle / update a single checklist item inside `catalog_checklists.items` JSON.
    * One catalog row holds the whole checklist; items stay nested (not one-row-per-item).
@@ -1415,6 +1666,8 @@ function stopAsNode(
     city?: string | null;
     days?: number | null;
     countryCode?: string | null;
+    isLocked?: boolean | null;
+    isCustom?: boolean | null;
   },
   journeyId: string,
 ) {
@@ -1452,5 +1705,7 @@ function stopAsNode(
     },
     costAmount: 0,
     costCurrency: "IDR",
+    isLocked: Boolean(stop.isLocked),
+    isCustom: Boolean(stop.isCustom),
   };
 }

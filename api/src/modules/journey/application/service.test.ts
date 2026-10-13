@@ -810,4 +810,138 @@ describe("JourneyService", () => {
     assert.equal((tripRow.startDate as Date).toISOString().slice(0, 10), "2026-11-02");
     assert.equal((tripRow.endDate as Date).toISOString().slice(0, 10), "2026-11-06");
   });
+
+  it("User lock hotel -> regenerate plan -> hotel tetap", async () => {
+    const lockedHotelStop = {
+      id: "stop-hotel-1",
+      journeyId: "journey-1",
+      parentStopId: null,
+      kind: "stay",
+      name: "Tokyo Imperial Hotel",
+      path: "journey/stay_tokyo",
+      isLocked: true,
+      isCustom: false,
+      suppressAiRestore: false,
+      deletedAt: null as Date | null,
+      sortOrder: 0,
+      bookings: [
+        { id: "b1", kind: "hotel", name: "Imperial Suite" },
+      ],
+    };
+    const openStop = {
+      id: "stop-kyoto-1",
+      journeyId: "journey-1",
+      parentStopId: null,
+      kind: "stay",
+      name: "Kyoto Traditional Ryokan",
+      path: "journey/stay_kyoto",
+      isLocked: false,
+      isCustom: false,
+      suppressAiRestore: false,
+      deletedAt: null as Date | null,
+      sortOrder: 1,
+      bookings: [],
+    };
+
+    const stopsDatabase = [lockedHotelStop, openStop];
+    const softDeletedIds: string[] = [];
+
+    const tripRow = {
+      id: "trip-1",
+      userId: "user-1",
+      title: "Japan Tour",
+      originCity: "Jakarta",
+      destinationSummary: "Tokyo, Kyoto",
+      startDate: new Date("2026-11-01"),
+      endDate: new Date("2026-11-07"),
+      partySize: 2,
+      baseCurrency: "IDR",
+      status: "ready",
+      journey: {
+        id: "journey-1",
+        name: "Japan Tour",
+        stops: stopsDatabase,
+      },
+    };
+
+    const db = {
+      user: {
+        findUnique: async () => null,
+      },
+      trip: {
+        findFirst: async () => tripRow,
+        update: async () => ({}),
+      },
+      journey: {
+        update: async () => ({}),
+      },
+      stop: {
+        findMany: async () => stopsDatabase,
+        update: async (args: { where: { id: string }; data: { deletedAt?: Date } }) => {
+          if (args.data.deletedAt) {
+            softDeletedIds.push(args.where.id);
+            const found = stopsDatabase.find((s) => s.id === args.where.id);
+            if (found) found.deletedAt = args.data.deletedAt;
+          }
+          return {};
+        },
+        create: async (args: { data: Record<string, unknown> }) => {
+          const created = { id: `stop-new-${Math.random()}`, ...args.data, bookings: [] };
+          stopsDatabase.push(created as never);
+          return created;
+        },
+      },
+      booking: {
+        create: async () => ({}),
+      },
+      note: {
+        create: async () => ({}),
+      },
+      $transaction: async (fn: (tx: never) => unknown) => fn({} as never),
+    };
+
+    const planner = {
+      mcpName: "inprocess",
+      extractPlanSlots: async () => ({
+        llm: "heuristic",
+        extracted: { destination: "Japan", startDate: "2026-11-01", endDate: "2026-11-07" },
+        missing: [],
+      }),
+      planSkeleton: async () => ({
+        llm: "heuristic",
+        skeleton: {
+          title: "Japan Tour Revamp",
+          originCity: "Jakarta",
+          destinationSummary: "Tokyo, Kyoto, Osaka",
+          assumedStartDate: "2026-11-01",
+          assumedEndDate: "2026-11-07",
+          checkpoints: [
+            { city: "Tokyo", countryCode: "JP", role: "STAY" as const, days: 3, needs: [] },
+            { city: "Kyoto", countryCode: "JP", role: "STAY" as const, days: 2, needs: [] },
+          ],
+        },
+      }),
+      executeSkeletonNeeds: async () => ({ mcp: "inprocess", checkpoints: [] }),
+    };
+
+    const service = new JourneyService(db as never, {
+      planner: planner as never,
+    });
+
+    await service.planTrip({
+      tripId: "trip-1",
+      userId: "user-1",
+      prompt: "Regenerate Japan Tour",
+      preferences: { startDate: "2026-11-01", endDate: "2026-11-07" },
+      executeTools: false,
+    });
+
+    // Hotel yang di-lock TIDAK pernah di-soft-delete!
+    assert.equal(lockedHotelStop.deletedAt, null);
+    assert.ok(!softDeletedIds.includes("stop-hotel-1"), "Locked hotel must not be soft-deleted");
+
+    // Sedangkan open stop yang tidak di-lock berhasil digantikan
+    assert.ok(softDeletedIds.includes("stop-kyoto-1"), "Non-locked stop can be replanned");
+  });
 });
+
