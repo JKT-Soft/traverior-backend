@@ -1068,6 +1068,76 @@ export class JourneyService {
   }
 
   /**
+   * Append a new custom checklist item inside `catalog_checklists.items` JSON.
+   * If the trip does not have a checklist yet, one is created automatically.
+   */
+  async addChecklistItem(input: {
+    tripId: string;
+    userId: string;
+    checklistId?: string;
+    title: string;
+    category?: string;
+  }) {
+    const title = input.title?.trim();
+    if (!title) throw new ValidationError("Checklist item title is required");
+
+    const trip = await this.db.trip.findFirst({
+      where: { id: input.tripId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+
+    let checklist = input.checklistId
+      ? await this.db.catalogChecklist.findFirst({
+          where: { id: input.checklistId, tripId: input.tripId },
+        })
+      : await this.db.catalogChecklist.findFirst({
+          where: { tripId: input.tripId },
+          orderBy: { createdAt: "desc" },
+        });
+
+    if (!checklist) {
+      checklist = await this.db.catalogChecklist.create({
+        data: {
+          tripId: input.tripId,
+          title: "Trip checklist",
+          provider: "user",
+          items: [],
+        },
+      });
+    }
+
+    const items = normalizeChecklistItems(checklist.items);
+    const category = input.category?.trim() || "Essentials";
+    const newItem: StoredChecklistItem = {
+      id: randomUUID(),
+      label: title,
+      done: false,
+      source: "user",
+      category,
+    };
+
+    const nextItems = [...items, newItem];
+
+    const updated = await this.db.catalogChecklist.update({
+      where: { id: checklist.id },
+      data: { items: nextItems as Prisma.InputJsonValue },
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId);
+
+    return {
+      id: updated.id,
+      tripId: updated.tripId,
+      title: updated.title,
+      provider: updated.provider,
+      item: newItem,
+      items: normalizeChecklistItems(updated.items),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+  }
+
+  /**
    * Full plan flow: LLM skeleton → MCP tools → persist stops and catalog → cost roll-up.
    * Pass `skeleton` to skip slot extraction / skeleton LLM (used by planning chat search).
    */
@@ -1532,6 +1602,7 @@ type StoredChecklistItem = {
   label: string;
   done: boolean;
   source: "template" | "visa" | "user";
+  category?: string;
 };
 
 function normalizeChecklistItems(raw: unknown): StoredChecklistItem[] {
@@ -1555,11 +1626,18 @@ function normalizeChecklistItems(raw: unknown): StoredChecklistItem[] {
       row.source === "visa" || row.source === "user" || row.source === "template"
         ? row.source
         : "template";
+    const category =
+      typeof row.category === "string" && row.category.trim().length > 0
+        ? row.category.trim()
+        : typeof row.section === "string" && row.section.trim().length > 0
+          ? row.section.trim()
+          : undefined;
     items.push({
       id,
       label,
       done: Boolean(row.done),
       source,
+      ...(category ? { category } : {}),
     });
   }
   return items;

@@ -25,6 +25,11 @@ function createPrismaMock(): {
   stopEditLog: {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
   };
+  catalogChecklist: {
+    findFirst: MockFn<(...args: never[]) => Promise<unknown>>;
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
   $transaction: MockFn<(fn: (tx: unknown) => unknown) => Promise<unknown>>;
 } {
   return {
@@ -50,6 +55,11 @@ function createPrismaMock(): {
     },
     stopEditLog: {
       create: createMockFn(async () => ({ id: "log-1" })),
+    },
+    catalogChecklist: {
+      findFirst: createMockFn(async () => null),
+      create: createMockFn(async () => ({})),
+      update: createMockFn(async () => ({})),
     },
     $transaction: createMockFn(async (fn: (tx: unknown) => unknown) => fn({})),
   };
@@ -229,5 +239,51 @@ describe("journey http routes", () => {
 
     await app.close();
   });
+
+  it("adds and updates checklist items via HTTP", async () => {
+    prismaMock.user.upsert = createMockFn(async () => ({ id: "user-1", firebaseUid: "demo" }));
+    const tripId = "00000000-0000-0000-0000-000000000001";
+    const checklistId = "00000000-0000-0000-0000-000000000002";
+    prismaMock.trip.findFirst = createMockFn(async () => ({ id: tripId, userId: "user-1" }));
+    prismaMock.catalogChecklist.findFirst = createMockFn(async () => ({
+      id: checklistId,
+      tripId,
+      title: "Trip checklist",
+      provider: "user",
+      items: [
+        { id: "item-1", label: "Existing item", done: false, source: "template" },
+      ],
+      updatedAt: new Date("2026-10-14T00:00:00.000Z"),
+    }));
+    prismaMock.catalogChecklist.update = createMockFn(async (args: { data: { items: unknown } }) => ({
+      id: checklistId,
+      tripId,
+      title: "Trip checklist",
+      provider: "user",
+      items: args.data.items,
+      updatedAt: new Date("2026-10-14T01:00:00.000Z"),
+    }));
+
+    const { routes } = createJourneyModule({ db: prismaMock as never });
+    const app = await buildTestApp(routes, { user: { uid: "demo" } });
+
+    // 1. Add checklist item (POST)
+    const addRes = await injectJson(app, "POST", `/${tripId}/checklists/${checklistId}/items`, {
+      body: { title: "Bring camera", category: "Essentials" },
+    });
+    assert.equal(addRes.statusCode, 201);
+    assert.equal(addRes.json().data.checklist.items.length, 2);
+    assert.equal(addRes.json().data.checklist.items[1].label, "Bring camera");
+    assert.equal(addRes.json().data.checklist.items[1].category, "Essentials");
+
+    // 2. Update checklist item (PATCH)
+    const patchRes = await injectJson(app, "PATCH", `/${tripId}/checklists/${checklistId}/items/item-1`, {
+      body: { done: true },
+    });
+    assert.equal(patchRes.statusCode, 200);
+
+    await app.close();
+  });
 });
+
 

@@ -73,6 +73,16 @@ const updateChecklistItemSchema = z.object({
   done: z.boolean(),
 });
 
+const checklistParams = z.object({
+  tripId: z.string().uuid(),
+  checklistId: z.string().uuid(),
+});
+
+const addChecklistItemSchema = z.object({
+  title: z.string().min(1),
+  category: z.string().optional(),
+});
+
 const addNodeSchema = z.object({
   parentId: z.string().uuid(),
   type: z.enum([
@@ -408,6 +418,45 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           done: body.data.done,
         });
         return ok(reply, { checklist });
+      },
+    );
+
+    app.post<{
+      Params: { tripId: string; checklistId: string };
+      Body: { title: string; category?: string };
+    }>(
+      "/:tripId/checklists/:checklistId/items",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Add custom checklist item",
+          description:
+            "Append a new custom checklist item to catalog_checklists.items JSON for the trip.",
+          params: checklistParams,
+          paramsExample: {
+            tripId: SAMPLE_TRIP_ID,
+            checklistId: SAMPLE_CHECKLIST_ID,
+          },
+          body: addChecklistItemSchema,
+          bodyExample: { title: "Bring international plug adapter", category: "Essentials" },
+          statusCodes: [201],
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = checklistParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const body = addChecklistItemSchema.safeParse(req.body);
+        if (!body.success) throw new ValidationError("Invalid body");
+        const checklist = await service.addChecklistItem({
+          tripId: params.data.tripId,
+          userId: user.id,
+          checklistId: params.data.checklistId,
+          title: body.data.title,
+          category: body.data.category,
+        });
+        return ok(reply, { checklist }, 201);
       },
     );
 
