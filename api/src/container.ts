@@ -4,6 +4,7 @@ import { createAuthModule } from "./modules/auth/index.js";
 import { createChecklistModule } from "./modules/checklist/index.js";
 import { createCurrencyModule } from "./modules/currency/index.js";
 import { CostService } from "./modules/cost/service.js";
+import { createDisruptionModule } from "./modules/disruption/index.js";
 import { createEventModule } from "./modules/events/index.js";
 import { createFlightModule } from "./modules/flights/index.js";
 import { createHotelModule } from "./modules/hotels/index.js";
@@ -49,6 +50,7 @@ export type AppContainer = {
     checklist: ReturnType<typeof createChecklistModule>["service"];
     currency: ReturnType<typeof createCurrencyModule>["service"];
     journey: ReturnType<typeof createJourneyModule>["service"];
+    disruption: ReturnType<typeof createDisruptionModule>["service"];
     profile: ReturnType<typeof createProfileModule>["service"];
     savedPlaces: ReturnType<typeof createSavedPlaceModule>["service"];
     cost: CostService;
@@ -109,6 +111,11 @@ export async function createContainer(env: Env): Promise<AppContainer> {
     images: images.service,
     logs,
   });
+  const disruption = createDisruptionModule({
+    db: prisma,
+    weather: weather.service,
+    startWorker: env.nodeEnv === "production",
+  });
   const profile = createProfileModule();
   const savedPlaces = createSavedPlaceModule();
 
@@ -128,6 +135,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   });
 
   app.addHook("onClose", async () => {
+    disruption.worker?.stop();
     await cache.quit?.();
     await mcp.close?.();
   });
@@ -190,6 +198,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
   await app.register(checklist.routes, { prefix: "/v1/checklist" });
   await app.register(currency.routes, { prefix: "/v1/currency" });
   await app.register(journey.routes, { prefix: "/v1/trips" });
+  await app.register(disruption.routes, { prefix: "/v1/trips" });
   await app.register(profile.routes, { prefix: "/v1/profile" });
   await app.register(savedPlaces.routes, { prefix: "/v1/saved-places" });
   await app.register(createPlannerRoutes(planner), { prefix: "/v1/planner" });
@@ -213,6 +222,7 @@ export async function createContainer(env: Env): Promise<AppContainer> {
       checklist: checklist.service,
       currency: currency.service,
       journey: journey.service,
+      disruption: disruption.service,
       profile: profile.service,
       savedPlaces: savedPlaces.service,
       cost,
