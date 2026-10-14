@@ -137,6 +137,10 @@ describe("serializePlanResponse", () => {
       (travel.bookings as { flightIds: string[] }).flightIds,
       (stay.bookings as { flightIds: string[] }).flightIds,
     );
+    assert.deepEqual(
+      (stay.bookings as { checklistIds: string[] }).checklistIds,
+      Object.keys(response.catalog.checklists),
+    );
 
     const flight = Object.values(response.catalog.flights)[0]!;
     assert.ok(String(flight.deepLinkUrl).includes("google.com/travel/flights"));

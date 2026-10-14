@@ -116,6 +116,7 @@ export function buildToolCallsForNeed(
           tool: "generate_checklist",
           arguments: {
             destination: checkpoint.city,
+            countryCode: checkpoint.countryCode,
             passportCountry: ctx.passportCountry ?? "ID",
           },
         },

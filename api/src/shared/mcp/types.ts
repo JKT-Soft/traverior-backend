@@ -89,6 +89,7 @@ export type McpDomainServices = {
   checklist: {
     generate: (q: {
       destination: string;
+      countryCode?: string;
       passportCountry?: string;
       visaDocuments?: string[];
     }) => Promise<ChecklistResult>;
