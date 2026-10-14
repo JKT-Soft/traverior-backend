@@ -85,6 +85,8 @@ describe("mapLiteApiHotel", () => {
     assert.deepEqual(offer.board, { type: "BB", name: "Breakfast Included" });
     assert.equal(offer.refundable, true);
     assert.equal(offer.price.isEstimate, false);
+    assert.ok(offer.deepLinkUrl?.includes("google.com/travel/hotels"));
+    assert.ok(offer.deepLinkUrl?.includes("Osaka"));
   });
 
   it("falls back when rate and meta are sparse", () => {

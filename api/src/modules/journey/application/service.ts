@@ -21,6 +21,7 @@ import type { ImageService } from "../../images/index.js";
 import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
 import type { PlanSkeletonInput, TripSkeleton } from "../../planner/domain/skeleton.js";
+import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromStops, coverLocationFromTrip } from "./cover-image.js";
 import { serializeTrip } from "./serialize-trip.js";
@@ -895,7 +896,7 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
-      const { skeleton, llm } = input.skeleton
+      const planned = input.skeleton
         ? { skeleton: input.skeleton, llm: this.planner.llmName }
         : await this.planner.planSkeleton(
             {
@@ -911,6 +912,13 @@ export class JourneyService {
               userId: input.userId,
             },
           );
+      // Locked drafts skip planSkeleton — still normalize so origin/airport IATA and
+      // first/last flight needs exist before provider search.
+      const skeleton = normalizeTripSkeleton(planned.skeleton, {
+        tripOriginCity: trip.originCity,
+        preferences: mergedPreferences,
+      });
+      const llm = planned.llm;
       await planLog?.progress({
         message: input.skeleton ? "Locked planning draft loaded" : "LLM skeleton generated",
         payload: {
@@ -950,6 +958,9 @@ export class JourneyService {
         departureDate: dates.start,
         returnDate: dates.end,
         ...input.context,
+        originIata: input.context?.originIata ?? skeleton.originIata,
+        destinationIata:
+          input.context?.destinationIata ?? skeleton.checkpoints[0]?.airportIata,
       };
 
       const execution = executeTools
@@ -966,6 +977,7 @@ export class JourneyService {
         buildPlanDrafts(skeleton, execution, {
           originCity: skeleton.originCity,
           returnCity: skeleton.originCity,
+          originIata: skeleton.originIata ?? context.originIata,
           startDate: dates.start,
           endDate: dates.end,
         }),

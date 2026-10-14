@@ -1,3 +1,4 @@
+import { resolveOfferDeepLink } from "../../../shared/deep-link.js";
 import { moneyToNumber } from "./serialize-trip.js";
 
 type CatalogRow = {
@@ -226,6 +227,11 @@ export function serializePlanResponse(input: {
     for (const booking of bookings) {
       const row = rowFor(booking);
       const content = catalogPayload(row);
+      const deepLinkUrl = resolveOfferDeepLink(booking.kind, content, booking.deepLinkUrl);
+      if (deepLinkUrl) {
+        content.deepLinkUrl = deepLinkUrl;
+        content.deepLink = deepLinkUrl;
+      }
       const cost = budgetFrom(booking.costAmount, booking.costCurrency, booking.costIsEstimate, currency);
       if (booking.kind === "flight") {
         const id = `flt_${citySlug}_${++flightNo}`;

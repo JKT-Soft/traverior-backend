@@ -41,6 +41,10 @@ describe("persist-plan", () => {
                     {
                       hotelId: "h1",
                       name: "Hotel A",
+                      city: "Osaka",
+                      checkIn: "2026-10-01",
+                      checkOut: "2026-10-03",
+                      deepLinkUrl: "https://example.com/hotels/Hotel%20A",
                       price: { amount: 100, currency: "USD" },
                     },
                   ],
@@ -62,6 +66,7 @@ describe("persist-plan", () => {
     assert.equal(stay?.bookings[0]?.kind, "hotel");
     assert.equal(stay?.bookings[0]?.payload.name, "Hotel A");
     assert.equal(stay?.bookings[0]?.costAmount, 100);
+    assert.equal(stay?.bookings[0]?.deepLinkUrl, "https://example.com/hotels/Hotel%20A");
     assert.equal(drafts[3]?.kind, "travel");
     assert.equal(drafts[4]?.hubRole, "return");
   });
@@ -172,6 +177,153 @@ describe("persist-plan", () => {
     assert.equal(stay?.bookings[0]?.kind, "checklist");
     const tip = stay?.notes.find((note) => note.title === "Getting around");
     assert.equal(tip?.body, "Use an IC card in Osaka.");
+  });
+
+  it("attaches each flight leg to its travel stop including return", () => {
+    const drafts = buildPlanDrafts(
+      {
+        title: "Europe",
+        originCity: "Jakarta",
+        originIata: "CGK",
+        checkpoints: [
+          {
+            city: "London",
+            countryCode: "GB",
+            airportIata: "LHR",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+          {
+            city: "Paris",
+            countryCode: "FR",
+            airportIata: "CDG",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+          {
+            city: "Amsterdam",
+            countryCode: "NL",
+            airportIata: "AMS",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+        ],
+      },
+      {
+        checkpoints: [
+          {
+            checkpoint: {
+              city: "London",
+              role: "STAY",
+              days: 2,
+              needs: ["flights"],
+            },
+            results: [
+              {
+                ok: true,
+                tool: "search_flights",
+                data: {
+                  provider: "mock",
+                  offers: [
+                    {
+                      id: "cgk-lhr",
+                      origin: "CGK",
+                      destination: "LHR",
+                      price: { amount: 1, currency: "USD" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            checkpoint: {
+              city: "Paris",
+              role: "STAY",
+              days: 2,
+              needs: ["flights"],
+            },
+            results: [
+              {
+                ok: true,
+                tool: "search_flights",
+                data: {
+                  provider: "mock",
+                  offers: [
+                    {
+                      id: "lhr-cdg",
+                      origin: "LHR",
+                      destination: "CDG",
+                      price: { amount: 2, currency: "USD" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            checkpoint: {
+              city: "Amsterdam",
+              role: "STAY",
+              days: 2,
+              needs: ["flights"],
+            },
+            results: [
+              {
+                ok: true,
+                tool: "search_flights",
+                data: {
+                  provider: "mock",
+                  offers: [
+                    {
+                      id: "cdg-ams",
+                      origin: "CDG",
+                      destination: "AMS",
+                      price: { amount: 3, currency: "USD" },
+                    },
+                  ],
+                },
+              },
+              {
+                ok: true,
+                tool: "search_flights",
+                data: {
+                  provider: "mock",
+                  offers: [
+                    {
+                      id: "ams-cgk",
+                      origin: "AMS",
+                      destination: "CGK",
+                      price: { amount: 4, currency: "USD" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      { originCity: "Jakarta", returnCity: "Jakarta", originIata: "CGK" },
+    );
+
+    const travelFlights = drafts
+      .filter((draft) => draft.kind === "travel")
+      .map((draft) => ({
+        name: draft.name,
+        flights: draft.bookings
+          .filter((booking) => booking.kind === "flight")
+          .map((booking) => `${booking.payload.origin}-${booking.payload.destination}`),
+      }));
+
+    assert.deepEqual(travelFlights, [
+      { name: "Flight to London", flights: ["CGK-LHR"] },
+      { name: "Travel to Paris", flights: ["LHR-CDG"] },
+      { name: "Travel to Amsterdam", flights: ["CDG-AMS"] },
+      { name: "Return to Jakarta", flights: ["AMS-CGK"] },
+    ]);
   });
 
   it("assigns contiguous stay dates across destination stops", () => {

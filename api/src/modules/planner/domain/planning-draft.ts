@@ -249,7 +249,7 @@ export function skeletonFromDraftCard(draft: PlanningDraftCard): TripSkeleton {
     summary: draft.tone ?? undefined,
     concept: draft.concept ?? undefined,
     tone: draft.tone ?? undefined,
-    originCity: draft.originCity ?? undefined,
+    originCity: draft.originCity?.trim() || undefined,
     destinationSummary: draft.destinationSummary ?? undefined,
     assumedStartDate: draft.startDate ?? undefined,
     assumedEndDate: draft.endDate ?? undefined,
