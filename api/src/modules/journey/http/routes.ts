@@ -73,6 +73,16 @@ const updateChecklistItemSchema = z.object({
   done: z.boolean(),
 });
 
+const checklistParams = z.object({
+  tripId: z.string().uuid(),
+  checklistId: z.string().uuid(),
+});
+
+const addChecklistItemSchema = z.object({
+  title: z.string().min(1),
+  category: z.string().optional(),
+});
+
 const addNodeSchema = z.object({
   parentId: z.string().uuid(),
   type: z.enum([
@@ -93,6 +103,31 @@ const addNodeSchema = z.object({
   deepLinkUrl: z.string().url().optional(),
   provider: z.string().optional(),
   providerRef: z.string().optional(),
+});
+
+const nodeParamsSchema = z.object({
+  tripId: z.string().min(1),
+  nodeId: z.string().uuid(),
+});
+
+const updateNodeSchema = z.object({
+  title: z.string().min(1).optional(),
+  subtitle: z.string().nullable().optional(),
+  status: z.enum(["planned", "active", "completed", "disrupted", "skipped"]).optional(),
+  isLocked: z.boolean().optional(),
+  scheduleStart: z.string().datetime({ offset: true }).nullable().optional(),
+  scheduleEnd: z.string().datetime({ offset: true }).nullable().optional(),
+  dateStart: z.string().nullable().optional(),
+  dateEnd: z.string().nullable().optional(),
+  locationLabel: z.string().nullable().optional(),
+  locationLat: z.number().nullable().optional(),
+  locationLng: z.number().nullable().optional(),
+  days: z.number().int().positive().nullable().optional(),
+});
+
+const reorderNodesSchema = z.object({
+  parentId: z.string().uuid().nullable().optional(),
+  nodeIds: z.array(z.string().uuid()).min(1),
 });
 
 export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync {
@@ -383,6 +418,182 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           done: body.data.done,
         });
         return ok(reply, { checklist });
+      },
+    );
+
+    app.post<{
+      Params: { tripId: string; checklistId: string };
+      Body: { title: string; category?: string };
+    }>(
+      "/:tripId/checklists/:checklistId/items",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Add custom checklist item",
+          description:
+            "Append a new custom checklist item to catalog_checklists.items JSON for the trip.",
+          params: checklistParams,
+          paramsExample: {
+            tripId: SAMPLE_TRIP_ID,
+            checklistId: SAMPLE_CHECKLIST_ID,
+          },
+          body: addChecklistItemSchema,
+          bodyExample: { title: "Bring international plug adapter", category: "Essentials" },
+          statusCodes: [201],
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = checklistParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const body = addChecklistItemSchema.safeParse(req.body);
+        if (!body.success) throw new ValidationError("Invalid body");
+        const checklist = await service.addChecklistItem({
+          tripId: params.data.tripId,
+          userId: user.id,
+          checklistId: params.data.checklistId,
+          title: body.data.title,
+          category: body.data.category,
+        });
+        return ok(reply, { checklist }, 201);
+      },
+    );
+
+    app.patch<{ Params: { tripId: string; nodeId: string } }>(
+      "/:tripId/nodes/:nodeId",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Update trip node",
+          description: "Update title, status, lock status, schedule, or location of a stop.",
+          params: nodeParamsSchema,
+          paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
+          body: updateNodeSchema,
+          bodyExample: { title: "Grand Hotel", isLocked: true },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = nodeParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const parsed = updateNodeSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const node = await service.updateNode({
+          tripId: params.data.tripId,
+          userId: user.id,
+          nodeId: params.data.nodeId,
+          ...parsed.data,
+        });
+        return ok(reply, { node });
+      },
+    );
+
+    app.delete<{ Params: { tripId: string; nodeId: string } }>(
+      "/:tripId/nodes/:nodeId",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Delete trip node",
+          description: "Soft delete a stop and cascade to its descendants with suppress AI restore.",
+          params: nodeParamsSchema,
+          paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = nodeParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const result = await service.deleteNode({
+          tripId: params.data.tripId,
+          userId: user.id,
+          nodeId: params.data.nodeId,
+        });
+        return ok(reply, result);
+      },
+    );
+
+    app.post<{ Params: { tripId: string; nodeId: string } }>(
+      "/:tripId/nodes/:nodeId/lock",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Lock trip node",
+          description: "Lock a stop to prevent AI replan from removing or replacing it.",
+          params: nodeParamsSchema,
+          paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = nodeParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const node = await service.setNodeLock({
+          tripId: params.data.tripId,
+          userId: user.id,
+          nodeId: params.data.nodeId,
+          isLocked: true,
+        });
+        return ok(reply, { node });
+      },
+    );
+
+    app.post<{ Params: { tripId: string; nodeId: string } }>(
+      "/:tripId/nodes/:nodeId/unlock",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Unlock trip node",
+          description: "Unlock a stop to allow AI replan to mutate it.",
+          params: nodeParamsSchema,
+          paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = nodeParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const node = await service.setNodeLock({
+          tripId: params.data.tripId,
+          userId: user.id,
+          nodeId: params.data.nodeId,
+          isLocked: false,
+        });
+        return ok(reply, { node });
+      },
+    );
+
+    app.patch<{ Params: { tripId: string } }>(
+      "/:tripId/nodes/reorder",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Reorder trip nodes",
+          description: "Reorder sibling stops by updating their sortOrder.",
+          params: tripIdParams,
+          paramsExample: { tripId: SAMPLE_TRIP_ID },
+          body: reorderNodesSchema,
+          bodyExample: { nodeIds: [SAMPLE_NODE_ID] },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = tripIdParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const parsed = reorderNodesSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const result = await service.reorderNodes({
+          tripId: params.data.tripId,
+          userId: user.id,
+          parentId: parsed.data.parentId,
+          nodeIds: parsed.data.nodeIds,
+        });
+        return ok(reply, result);
       },
     );
   };

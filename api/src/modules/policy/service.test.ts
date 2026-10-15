@@ -77,4 +77,47 @@ describe("PolicyService", () => {
       ["trip/kyoto"],
     );
   });
+
+  it("preserves top-level stop when parentId is null and node is locked", () => {
+    const lockedStay: PipelinePolicyNode = {
+      ...open,
+      id: "stay_tokyo",
+      path: "journey/stay_tokyo",
+      kind: "stay",
+      parentId: null,
+      isLocked: true,
+    };
+    const openStay: PipelinePolicyNode = {
+      ...open,
+      id: "stay_kyoto",
+      path: "journey/stay_kyoto",
+      kind: "stay",
+      parentId: null,
+      isLocked: false,
+    };
+
+    const plan = policy.planReplacement([lockedStay, openStay]);
+    assert.deepEqual(
+      plan.preserved.map((node) => node.id),
+      ["stay_tokyo"],
+    );
+    assert.deepEqual(
+      plan.replaceable.map((node) => node.id),
+      ["stay_kyoto"],
+    );
+
+    const drafts = policy.filterDrafts(
+      [
+        { path: "journey/stay_tokyo" },
+        { path: "journey/stay_kyoto" },
+        { path: "journey/stay_osaka" },
+      ],
+      plan.preserved,
+    );
+    assert.deepEqual(
+      drafts.map((draft) => draft.path),
+      ["journey/stay_kyoto", "journey/stay_osaka"],
+    );
+  });
 });
+

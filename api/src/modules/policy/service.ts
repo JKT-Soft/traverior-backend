@@ -41,7 +41,7 @@ export class PolicyService {
     const preservedIds = new Set<string>();
     for (const node of nodes) {
       if (!node.id) continue;
-      if (node.parentId === null || node.type === "JOURNEY") continue;
+      if (node.kind === "journey" || node.type === "JOURNEY") continue;
       if (this.canAiMutate(node)) continue;
       let current: T | undefined = node;
       while (current?.id) {
