@@ -888,6 +888,220 @@ export class JourneyService {
     return stopAsNode(updated, journey.id);
   }
 
+  async replaceBooking(input: {
+    tripId: string;
+    userId: string;
+    bookingId: string;
+    offer: Record<string, unknown>;
+    kind?: "flight" | "hotel" | "event" | "place";
+    replaceKey?: string;
+  }) {
+    const trip = await this.getTrip(input.tripId, input.userId);
+    let existing = await this.db.booking.findFirst({
+      where: {
+        id: input.bookingId,
+        stop: { journey: { tripId: trip.id } },
+      },
+    });
+    existing ??= await this.db.booking.findFirst({
+      where: {
+        stop: { journey: { tripId: trip.id } },
+        OR: [
+          { catalogPlaceId: input.bookingId },
+          { catalogHotelId: input.bookingId },
+          { catalogEventId: input.bookingId },
+        ],
+      },
+    });
+    if (!existing) {
+      return this.replaceStopContent({
+        tripId: input.tripId,
+        userId: input.userId,
+        stopId: input.bookingId,
+        offer: input.offer,
+      });
+    }
+
+    const kind = input.kind ?? (existing.kind === "hotel" || existing.kind === "event" || existing.kind === "flight" || existing.kind === "place"
+      ? existing.kind
+      : null);
+    if (kind !== "flight" && kind !== "hotel" && kind !== "event" && kind !== "place") {
+      throw new ValidationError("This booking type cannot be replaced");
+    }
+
+    if (kind === "place" && existing.catalogPlaceId) {
+      await this.replaceCatalogPlaceItem({
+        catalogPlaceId: existing.catalogPlaceId,
+        offer: input.offer,
+        replaceKey: input.replaceKey,
+      });
+      const updated = await this.db.booking.update({
+        where: { id: existing.id },
+        data: { role: "selected", origin: "user" },
+      });
+      await this.invalidateUserTrips(input.userId, input.tripId, existing.stopId);
+      return {
+        id: updated.id,
+        kind: updated.kind,
+        role: updated.role,
+        deepLinkUrl: updated.deepLinkUrl,
+        costAmount: updated.costAmount,
+        costCurrency: updated.costCurrency,
+      };
+    }
+
+    const price =
+      input.offer.price && typeof input.offer.price === "object" && !Array.isArray(input.offer.price)
+        ? (input.offer.price as Record<string, unknown>)
+        : {};
+    const costAmount =
+      typeof price.amount === "number"
+        ? price.amount
+        : typeof input.offer.costAmount === "number"
+          ? input.offer.costAmount
+          : existing.costAmount
+            ? Number(existing.costAmount)
+            : undefined;
+    const costCurrency =
+      (typeof price.currency === "string" && price.currency) ||
+      (typeof input.offer.costCurrency === "string" && input.offer.costCurrency) ||
+      existing.costCurrency ||
+      trip.baseCurrency;
+    const deepLink =
+      (typeof input.offer.deepLinkUrl === "string" && input.offer.deepLinkUrl) ||
+      (typeof input.offer.deepLink === "string" && input.offer.deepLink) ||
+      undefined;
+
+    const link = await createCatalogLink(this.db, trip.id, {
+      path: existing.id,
+      kind,
+      role: "selected",
+      provider: typeof input.offer.provider === "string" ? input.offer.provider : undefined,
+      providerRef:
+        (typeof input.offer.providerRef === "string" && input.offer.providerRef) ||
+        (typeof input.offer.hotelId === "string" && input.offer.hotelId) ||
+        (typeof input.offer.externalId === "string" && input.offer.externalId) ||
+        (typeof input.offer.flightNumber === "string" && input.offer.flightNumber) ||
+        undefined,
+      deepLinkUrl: deepLink,
+      costAmount,
+      costCurrency,
+      payload: input.offer,
+    });
+
+    const updated = await this.db.booking.update({
+      where: { id: existing.id },
+      data: {
+        kind,
+        role: "selected",
+        ...link,
+        deepLinkUrl: deepLink ?? existing.deepLinkUrl,
+        costAmount: costAmount ?? undefined,
+        costCurrency: costCurrency?.slice(0, 3),
+        costIsEstimate: true,
+        origin: "user",
+      },
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId, existing.stopId);
+    return {
+      id: updated.id,
+      kind: updated.kind,
+      role: updated.role,
+      deepLinkUrl: updated.deepLinkUrl,
+      costAmount: updated.costAmount,
+      costCurrency: updated.costCurrency,
+    };
+  }
+
+  private async replaceCatalogPlaceItem(input: {
+    catalogPlaceId: string;
+    offer: Record<string, unknown>;
+    replaceKey?: string;
+  }) {
+    const row = await this.db.catalogPlace.findFirst({
+      where: { id: input.catalogPlaceId },
+    });
+    if (!row) throw new NotFoundError("Place catalog not found");
+    const current = Array.isArray(row.places) ? [...row.places] : [];
+    const places = current.filter((item) => item && typeof item === "object") as Record<string, unknown>[];
+    const key = (input.replaceKey ?? "").trim().toLowerCase();
+    const nextPlace = {
+      ...input.offer,
+      name: typeof input.offer.name === "string" ? input.offer.name : input.offer.title,
+    };
+    const index = places.findIndex((place) => {
+      const id = typeof place.placeId === "string" ? place.placeId.toLowerCase() : "";
+      const name = typeof place.name === "string" ? place.name.toLowerCase() : "";
+      const title = typeof place.title === "string" ? place.title.toLowerCase() : "";
+      return key.length > 0 && (id === key || name === key || title === key);
+    });
+    if (index >= 0) places[index] = nextPlace;
+    else places.push(nextPlace);
+    const raw =
+      row.raw && typeof row.raw === "object" && !Array.isArray(row.raw)
+        ? { ...(row.raw as Record<string, unknown>), places }
+        : { places };
+    await this.db.catalogPlace.update({
+      where: { id: row.id },
+      data: {
+        places: places as Prisma.InputJsonValue,
+        raw: raw as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private async replaceStopContent(input: {
+    tripId: string;
+    userId: string;
+    stopId: string;
+    offer: Record<string, unknown>;
+  }) {
+    const trip = await this.getTrip(input.tripId, input.userId);
+    const journey = trip.journey;
+    if (!journey?.id) throw new ValidationError("Trip journey missing");
+    const existing = await this.db.stop.findFirst({
+      where: {
+        id: input.stopId,
+        journeyId: journey.id,
+        deletedAt: null,
+      },
+    });
+    if (!existing || (existing.kind !== "activity" && existing.kind !== "stay")) {
+      throw new NotFoundError("Booking not found in trip");
+    }
+    const name =
+      (typeof input.offer.name === "string" && input.offer.name) ||
+      (typeof input.offer.title === "string" && input.offer.title) ||
+      existing.name;
+    const address =
+      (typeof input.offer.formattedAddress === "string" && input.offer.formattedAddress) ||
+      (typeof input.offer.address === "string" && input.offer.address) ||
+      existing.locationLabel;
+    const lat = typeof input.offer.lat === "number" ? input.offer.lat : existing.locationLat;
+    const lng = typeof input.offer.lng === "number" ? input.offer.lng : existing.locationLng;
+    await this.db.stop.update({
+      where: { id: existing.id },
+      data: {
+        name,
+        subtitle: address,
+        locationLabel: address,
+        locationLat: lat,
+        locationLng: lng,
+        version: { increment: 1 },
+      },
+    });
+    await this.invalidateUserTrips(input.userId, input.tripId, existing.parentStopId);
+    return {
+      id: existing.id,
+      kind: existing.kind,
+      role: "selected",
+      deepLinkUrl: null,
+      costAmount: null,
+      costCurrency: null,
+    };
+  }
+
   async setNodeLock(input: {
     tripId: string;
     userId: string;
@@ -1029,8 +1243,16 @@ export class JourneyService {
     userId: string;
     checklistId: string;
     itemId: string;
-    done: boolean;
+    done?: boolean;
+    title?: string;
+    category?: string;
   }) {
+    const label = input.title?.trim();
+    const category = input.category?.trim();
+    if (input.done === undefined && !label && !category) {
+      throw new ValidationError("Provide done, title, or category");
+    }
+
     const trip = await this.db.trip.findFirst({
       where: { id: input.tripId, userId: input.userId },
       select: { id: true },
@@ -1046,9 +1268,15 @@ export class JourneyService {
     const index = items.findIndex((item) => item.id === input.itemId);
     if (index < 0) throw new NotFoundError("Checklist item not found");
 
-    const nextItems = items.map((item, i) =>
-      i === index ? { ...item, done: input.done } : item,
-    );
+    const nextItems = items.map((item, i) => {
+      if (i !== index) return item;
+      return {
+        ...item,
+        ...(input.done !== undefined ? { done: input.done } : {}),
+        ...(label ? { label } : {}),
+        ...(category ? { category } : {}),
+      };
+    });
 
     const updated = await this.db.catalogChecklist.update({
       where: { id: checklist.id },
@@ -1056,15 +1284,43 @@ export class JourneyService {
     });
 
     await this.invalidateUserTrips(input.userId, input.tripId);
+    return checklistApiPayload(updated);
+  }
 
-    return {
-      id: updated.id,
-      tripId: updated.tripId,
-      title: updated.title,
-      provider: updated.provider,
-      items: normalizeChecklistItems(updated.items),
-      updatedAt: updated.updatedAt.toISOString(),
-    };
+  /**
+   * Create a user-owned custom checklist for the trip (optionally with a first item).
+   */
+  async createChecklist(input: {
+    tripId: string;
+    userId: string;
+    title?: string;
+    itemTitle?: string;
+    category?: string;
+  }) {
+    const trip = await this.db.trip.findFirst({
+      where: { id: input.tripId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+
+    const title = input.title?.trim() || "My checklist";
+    const itemTitle = input.itemTitle?.trim();
+    const items: StoredChecklistItem[] = [];
+    if (itemTitle) {
+      items.push(newUserChecklistItem(itemTitle, input.category));
+    }
+
+    const created = await this.db.catalogChecklist.create({
+      data: {
+        tripId: input.tripId,
+        title,
+        provider: "user",
+        items: items as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId);
+    return checklistApiPayload(created);
   }
 
   /**
@@ -1096,11 +1352,15 @@ export class JourneyService {
           orderBy: { createdAt: "desc" },
         });
 
+    if (input.checklistId && !checklist) {
+      throw new NotFoundError("Checklist not found");
+    }
+
     if (!checklist) {
       checklist = await this.db.catalogChecklist.create({
         data: {
           tripId: input.tripId,
-          title: "Trip checklist",
+          title: "My checklist",
           provider: "user",
           items: [],
         },
@@ -1108,33 +1368,47 @@ export class JourneyService {
     }
 
     const items = normalizeChecklistItems(checklist.items);
-    const category = input.category?.trim() || "Essentials";
-    const newItem: StoredChecklistItem = {
-      id: randomUUID(),
-      label: title,
-      done: false,
-      source: "user",
-      category,
-    };
-
-    const nextItems = [...items, newItem];
-
+    const newItem = newUserChecklistItem(title, input.category);
     const updated = await this.db.catalogChecklist.update({
       where: { id: checklist.id },
-      data: { items: nextItems as Prisma.InputJsonValue },
+      data: { items: [...items, newItem] as Prisma.InputJsonValue },
     });
 
     await this.invalidateUserTrips(input.userId, input.tripId);
+    return { ...checklistApiPayload(updated), item: newItem };
+  }
 
-    return {
-      id: updated.id,
-      tripId: updated.tripId,
-      title: updated.title,
-      provider: updated.provider,
-      item: newItem,
-      items: normalizeChecklistItems(updated.items),
-      updatedAt: updated.updatedAt.toISOString(),
-    };
+  async deleteChecklistItem(input: {
+    tripId: string;
+    userId: string;
+    checklistId: string;
+    itemId: string;
+  }) {
+    const trip = await this.db.trip.findFirst({
+      where: { id: input.tripId, userId: input.userId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundError("Trip not found");
+
+    const checklist = await this.db.catalogChecklist.findFirst({
+      where: { id: input.checklistId, tripId: input.tripId },
+    });
+    if (!checklist) throw new NotFoundError("Checklist not found");
+
+    const items = normalizeChecklistItems(checklist.items);
+    if (!items.some((item) => item.id === input.itemId)) {
+      throw new NotFoundError("Checklist item not found");
+    }
+
+    const updated = await this.db.catalogChecklist.update({
+      where: { id: checklist.id },
+      data: {
+        items: items.filter((item) => item.id !== input.itemId) as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.invalidateUserTrips(input.userId, input.tripId);
+    return checklistApiPayload(updated);
   }
 
   /**
@@ -1604,6 +1878,34 @@ type StoredChecklistItem = {
   source: "template" | "visa" | "user";
   category?: string;
 };
+
+function newUserChecklistItem(label: string, category?: string): StoredChecklistItem {
+  return {
+    id: randomUUID(),
+    label,
+    done: false,
+    source: "user",
+    category: category?.trim() || "Essentials",
+  };
+}
+
+function checklistApiPayload(row: {
+  id: string;
+  tripId: string;
+  title: string;
+  provider: string;
+  items: unknown;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    tripId: row.tripId,
+    title: row.title,
+    provider: row.provider,
+    items: normalizeChecklistItems(row.items),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
 
 function normalizeChecklistItems(raw: unknown): StoredChecklistItem[] {
   if (!Array.isArray(raw)) return [];

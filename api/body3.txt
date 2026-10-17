@@ -1,0 +1,1 @@
+{"ok":true,"data":{"module":"places","provider":"google_places"}}
