@@ -53,6 +53,7 @@ describe("LiteApiHotelProvider", () => {
                 address: "A",
                 city_name: "Osaka",
                 rating: 8.2,
+                main_photo: "https://cdn.liteapi.travel/hotels/h1.jpg",
                 checkinCheckoutTimes: { checkin_start: "3:00 PM", checkout: "11:00 AM" },
               },
             ],
@@ -88,6 +89,7 @@ describe("LiteApiHotelProvider", () => {
     assert.equal(hotels[0]?.refundable, false);
     assert.equal(hotels[0]?.nights, 1);
     assert.equal(hotels[0]?.checkInTime, "15:00");
+    assert.equal(hotels[0]?.thumbnailUrl, "https://cdn.liteapi.travel/hotels/h1.jpg");
     assert.equal(hotels[1]?.price.isEstimate, true);
 
     restoreFetch();

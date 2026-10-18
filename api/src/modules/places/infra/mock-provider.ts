@@ -17,6 +17,8 @@ export class MockPlaceProvider implements PlaceProvider {
         types: ["restaurant"],
         formattedAddress: "Mock Street 1",
         isFree: false,
+        thumbnailUrl:
+          "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=400&q=80",
       },
     ];
   }

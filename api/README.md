@@ -29,7 +29,7 @@ src/
 **Swap a provider** without touching domain code:
 
 ```env
-PROVIDER_FLIGHTS=duffel   # or mock
+PROVIDER_FLIGHTS=duffel   # or mock | aviasales (needs TRAVELPAYOUTS_TOKEN)
 PROVIDER_HOTELS=liteapi   # or mock
 PROVIDER_PLACES=google    # or mock
 PROVIDER_ROUTES=google    # or mock

@@ -19,6 +19,8 @@ export class MockEventProvider implements EventProvider {
         price: { amount: 0, currency: "IDR", isEstimate: false },
         source: "mock",
         externalId: "mock-free-1",
+        thumbnailUrl:
+          "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=400&q=80",
       });
     }
     if (includePaid) {
@@ -33,6 +35,8 @@ export class MockEventProvider implements EventProvider {
         price: { amount: 350000, currency: "IDR", isEstimate: true },
         source: "mock",
         externalId: "mock-paid-1",
+        thumbnailUrl:
+          "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?auto=format&fit=crop&w=400&q=80",
       });
     }
     return items;

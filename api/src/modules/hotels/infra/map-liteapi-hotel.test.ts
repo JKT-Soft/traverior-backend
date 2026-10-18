@@ -69,6 +69,7 @@ describe("mapLiteApiHotel", () => {
         rating: 8.6,
         review_count: 120,
         checkinCheckoutTimes: { checkin_start: "03:00 PM", checkout: "11:00 AM" },
+        main_photo: "https://cdn.liteapi.travel/hotels/osaka.jpg",
       },
       query,
       "liteapi",
@@ -84,6 +85,7 @@ describe("mapLiteApiHotel", () => {
     assert.equal(offer.nights, 1);
     assert.deepEqual(offer.board, { type: "BB", name: "Breakfast Included" });
     assert.equal(offer.refundable, true);
+    assert.equal(offer.thumbnailUrl, "https://cdn.liteapi.travel/hotels/osaka.jpg");
     assert.equal(offer.price.isEstimate, false);
   });
 
@@ -110,5 +112,6 @@ describe("mapLiteApiHotel", () => {
     assert.equal(empty.name, "Hotel");
     assert.equal(empty.price.isEstimate, true);
     assert.equal(empty.stars, null);
+    assert.equal(empty.thumbnailUrl, null);
   });
 });

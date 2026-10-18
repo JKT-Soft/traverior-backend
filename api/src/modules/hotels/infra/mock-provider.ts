@@ -36,6 +36,7 @@ export class MockHotelProvider implements HotelProvider {
         nights,
         board: { type: "BB", name: "Breakfast" },
         refundable: true,
+        thumbnailUrl: `https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=400&q=80&sig=${encodeURIComponent(city)}`,
         price: {
           amount: 2_450_000 * nights,
           currency: query.currency ?? "IDR",

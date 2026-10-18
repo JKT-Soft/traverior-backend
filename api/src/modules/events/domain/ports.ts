@@ -16,6 +16,7 @@ export type EventResult = ProviderMeta & {
   startsAt?: string;
   source: "eventbrite" | "viator" | "mock";
   externalId: string;
+  thumbnailUrl?: string | null;
 };
 
 export interface EventProvider {

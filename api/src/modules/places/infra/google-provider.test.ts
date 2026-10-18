@@ -37,28 +37,37 @@ describe("GooglePlaceProvider", () => {
     await assert.rejects(() => p.searchPlaces({ textQuery: "x" }), /Google Places/);
 
     restoreFetch();
-    restoreFetch = stubFetch(
-      async () =>
-        ({
+    restoreFetch = stubFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/media")) {
+        return {
           ok: true,
-          json: async () => ({
-            places: [
-              {
-                id: "p1",
-                displayName: { text: "R" },
-                formattedAddress: "A",
-                location: { latitude: 1, longitude: 2 },
-                rating: 4,
-                types: ["restaurant"],
-              },
-              {},
-            ],
-          }),
-        }) as Response,
-    );
+          json: async () => ({ photoUri: "https://lh3.googleusercontent.com/p1.jpg" }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          places: [
+            {
+              id: "p1",
+              displayName: { text: "R" },
+              formattedAddress: "A",
+              location: { latitude: 1, longitude: 2 },
+              rating: 4,
+              types: ["restaurant"],
+              photos: [{ name: "places/p1/photos/abc" }],
+            },
+            {},
+          ],
+        }),
+      } as Response;
+    });
     const places = await p.searchPlaces({ textQuery: "food", maxResultCount: 2 });
     assert.equal(places[0]?.placeId, "p1");
+    assert.equal(places[0]?.thumbnailUrl, "https://lh3.googleusercontent.com/p1.jpg");
     assert.equal(places[1]?.name, "Place");
+    assert.equal(places[1]?.thumbnailUrl, null);
 
     restoreFetch();
     restoreFetch = stubFetch(

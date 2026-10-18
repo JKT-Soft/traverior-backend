@@ -22,7 +22,7 @@ export class LiteApiHotelProvider implements HotelProvider {
         guestNationality: query.guestNationality ?? "ID",
         occupancies: [{ adults: query.adults ?? 2 }],
         cityName: query.cityName,
-        countryCode: query.countryCode,
+        ...(query.countryCode ? { countryCode: query.countryCode } : {}),
         maxRatesPerHotel: 1,
         includeHotelData: true,
       }),

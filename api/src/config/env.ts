@@ -57,6 +57,10 @@ export type Env = {
   };
   secrets: {
     duffelAccessToken?: string;
+    travelpayoutsToken?: string;
+    travelpayoutsMarker?: string;
+    travelpayoutsCurrency?: string;
+    travelpayoutsMarket?: string;
     liteApiKey?: string;
     googleMapsApiKey?: string;
     openWeatherApiKey?: string;
@@ -184,6 +188,10 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     },
     secrets: {
       duffelAccessToken: source.DUFFEL_ACCESS_TOKEN,
+      travelpayoutsToken: source.TRAVELPAYOUTS_TOKEN?.trim() || undefined,
+      travelpayoutsMarker: source.TRAVELPAYOUTS_MARKER?.trim() || undefined,
+      travelpayoutsCurrency: source.TRAVELPAYOUTS_CURRENCY?.trim() || undefined,
+      travelpayoutsMarket: source.TRAVELPAYOUTS_MARKET?.trim() || undefined,
       liteApiKey: source.LITEAPI_KEY,
       googleMapsApiKey: source.GOOGLE_MAPS_API_KEY,
       openWeatherApiKey: source.OPENWEATHER_API_KEY,

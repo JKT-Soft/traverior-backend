@@ -43,6 +43,7 @@ describe("EventbriteEventProvider", () => {
     restoreFetch = stubFetch(async (input) => {
       const url = String(input);
       assert.match(url, /eventbriteapi\.com\/v3\/events\/search/);
+      assert.match(url, /logo/);
       return {
         ok: true,
         status: 200,
@@ -54,6 +55,7 @@ describe("EventbriteEventProvider", () => {
               url: "https://www.eventbrite.com/e/1",
               start: { utc: "2026-10-01T10:00:00Z" },
               is_free: true,
+              logo: { url: "https://img.evbuc.com/free.jpg" },
             },
             {
               id: "eb-2",
@@ -76,6 +78,7 @@ describe("EventbriteEventProvider", () => {
     const both = await p.searchEvents({ city: "Osaka", startDate: "2026-10-01", endDate: "2026-10-04" });
     assert.equal(both.length, 2);
     assert.equal(both[0]?.source, "eventbrite");
+    assert.equal(both[0]?.thumbnailUrl, "https://img.evbuc.com/free.jpg");
     assert.equal(both[1]?.price.amount, 3500);
   });
 
@@ -97,6 +100,7 @@ describe("EventbriteEventProvider", () => {
               url: "https://www.eventbrite.com/e/osaka-exchange-tickets-1871990456849",
               startDate: "2026-10-02",
               isAccessibleForFree: true,
+              image: "https://img.evbuc.com/exchange.jpg",
             },
           },
           {
@@ -135,6 +139,7 @@ describe("EventbriteEventProvider", () => {
     assert.equal(events[0]?.name, "Osaka Language Exchange");
     assert.equal(events[0]?.isFree, true);
     assert.equal(events[0]?.externalId, "1871990456849");
+    assert.equal(events[0]?.thumbnailUrl, "https://img.evbuc.com/exchange.jpg");
     assert.equal(events[1]?.price.amount, 25);
     assert.ok(!events.some((e) => e.name === "Too Early"));
   });

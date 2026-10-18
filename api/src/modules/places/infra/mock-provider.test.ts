@@ -8,5 +8,6 @@ describe("MockPlaceProvider", () => {
     assert.equal(p.name, "mock");
     const places = await p.searchPlaces({ textQuery: "cafe" });
     assert.ok(places[0]?.name.includes("cafe"));
+    assert.match(places[0]?.thumbnailUrl ?? "", /^https:\/\//);
   });
 });

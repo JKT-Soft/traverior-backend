@@ -74,7 +74,7 @@ export type FlightOffer = ProviderMeta & {
   slices: FlightSlice[];
 };
 
-/** Port — swap Duffel / Amadeus / mock without touching application code */
+/** Port — swap Duffel / Aviasales / mock without touching application code */
 export interface FlightProvider {
   readonly name: string;
   searchFlights(query: FlightSearchQuery): Promise<FlightOffer[]>;
