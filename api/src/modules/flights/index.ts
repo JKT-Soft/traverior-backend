@@ -3,13 +3,19 @@ import type { CacheStore } from "../../shared/cache/index.js";
 import { FlightService } from "./application/service.js";
 import type { FlightProvider } from "./domain/ports.js";
 import { createFlightRoutes } from "./http/routes.js";
+import { createAviasalesFlightProvider } from "./infra/aviasales-provider.js";
 import { createDuffelFlightProvider } from "./infra/duffel-provider.js";
+import { createGoogleFlightsProvider } from "./infra/google-flights-provider.js";
 import { MockFlightProvider } from "./infra/mock-provider.js";
 
 export function createFlightProvider(env: Env): FlightProvider {
   switch (env.providers.flights) {
     case "duffel":
       return createDuffelFlightProvider(env);
+    case "aviasales":
+      return createAviasalesFlightProvider(env);
+    case "google":
+      return createGoogleFlightsProvider(env);
     case "mock":
       return new MockFlightProvider();
     default:
@@ -34,7 +40,10 @@ export type {
   FlightAirline,
   FlightAirport,
   FlightBaggageAllowance,
+  FlightBookingOption,
   FlightOffer,
+  FlightOfferDetail,
+  FlightOfferDetailQuery,
   FlightProvider,
   FlightSearchQuery,
   FlightSegment,

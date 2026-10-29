@@ -58,6 +58,43 @@ describe("JourneyService.updateChecklistItem", () => {
     ]);
   });
 
+  it("updates a custom item label and category", async () => {
+    const updateChecklist = createMockFn(async (args: { data: { items: unknown } }) => ({
+      id: "chk-1",
+      tripId: "trip-1",
+      title: "Travel checklist",
+      provider: "internal",
+      items: args.data.items,
+      updatedAt: new Date("2026-10-12T01:00:00.000Z"),
+    }));
+    const service = new JourneyService({
+      trip: { findFirst: createMockFn(async () => ({ id: "trip-1" })) },
+      catalogChecklist: {
+        findFirst: createMockFn(async () => ({
+          id: "chk-1",
+          tripId: "trip-1",
+          title: "Travel checklist",
+          provider: "internal",
+          items: [{ id: "custom-1", label: "Old", done: false, source: "user", category: "Essentials" }],
+          updatedAt: new Date("2026-10-12T00:00:00.000Z"),
+        })),
+        update: updateChecklist,
+      },
+    } as never);
+
+    const result = await service.updateChecklistItem({
+      tripId: "trip-1",
+      userId: "user-1",
+      checklistId: "chk-1",
+      itemId: "custom-1",
+      title: "Bring camera",
+      category: "At destination",
+    });
+
+    assert.equal(result.items[0]?.label, "Bring camera");
+    assert.equal(result.items[0]?.category, "At destination");
+  });
+
   it("rejects unknown trip, checklist, or item", async () => {
     const serviceMissingTrip = new JourneyService({
       trip: { findFirst: createMockFn(async () => null) },

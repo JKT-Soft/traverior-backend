@@ -13,6 +13,7 @@ type EventbriteEvent = {
   url?: string;
   start?: { utc?: string; local?: string };
   is_free?: boolean;
+  logo?: { url?: string; original?: { url?: string } };
   ticket_availability?: {
     is_free?: boolean;
     minimum_ticket_price?: EventbriteMoney;
@@ -26,6 +27,7 @@ type JsonLdEvent = {
   startDate?: string;
   endDate?: string;
   description?: string;
+  image?: string | { url?: string; contentUrl?: string } | Array<string | { url?: string; contentUrl?: string }>;
   offers?:
     | { price?: string | number; priceCurrency?: string; lowPrice?: string | number }
     | Array<{ price?: string | number; priceCurrency?: string; lowPrice?: string | number }>;
@@ -106,6 +108,7 @@ function mapApiEvent(e: EventbriteEvent, fetchedAt: string): EventResult {
     startsAt: e.start?.utc ?? e.start?.local,
     source: "eventbrite",
     externalId: e.id ?? "unknown",
+    thumbnailUrl: httpUrl(e.logo?.original?.url) ?? httpUrl(e.logo?.url),
   };
 }
 
@@ -148,7 +151,25 @@ function mapLdEvent(event: JsonLdEvent, fetchedAt: string): EventResult {
     startsAt: event.startDate,
     source: "eventbrite",
     externalId: extractEventId(event.url),
+    thumbnailUrl: jsonLdImageUrl(event.image),
   };
+}
+
+function httpUrl(value?: string | null): string | null {
+  const url = value?.trim();
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
+function jsonLdImageUrl(
+  image?: JsonLdEvent["image"],
+): string | null {
+  if (!image) return null;
+  const first = Array.isArray(image) ? image[0] : image;
+  if (typeof first === "string") return httpUrl(first);
+  if (first && typeof first === "object") {
+    return httpUrl(first.url) ?? httpUrl(first.contentUrl);
+  }
+  return null;
 }
 
 function inDateRange(startsAt: string | undefined, startDate?: string, endDate?: string): boolean {
@@ -193,7 +214,7 @@ export class EventbriteEventProvider implements EventProvider {
   private async tryOfficialSearch(query: EventSearchQuery): Promise<EventResult[] | null> {
     const params = new URLSearchParams();
     params.set("location.address", query.city);
-    params.set("expand", "venue,ticket_availability");
+    params.set("expand", "venue,ticket_availability,logo");
     params.set("sort_by", "date");
     if (query.startDate) params.set("start_date.range_start", `${query.startDate}T00:00:00Z`);
     if (query.endDate) params.set("start_date.range_end", `${query.endDate}T23:59:59Z`);

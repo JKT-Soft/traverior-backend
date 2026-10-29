@@ -229,7 +229,7 @@ function heuristicSlotExtraction(user: string): SlotExtraction {
       id: "destination",
       field: "destination",
       severity: "required",
-      question: "Mau liburan ke mana?",
+      question: "Where do you want to go?",
       input: "text",
     });
   }
@@ -238,7 +238,7 @@ function heuristicSlotExtraction(user: string): SlotExtraction {
       id: "dates",
       field: "startDate",
       severity: "required",
-      question: "Kapan berangkat? Pilih tanggal mulai dan selesai.",
+      question: "When do you want to go? Pick a start and end date.",
       input: "date_range",
     });
   }
@@ -247,7 +247,7 @@ function heuristicSlotExtraction(user: string): SlotExtraction {
       id: "originCity",
       field: "originCity",
       severity: "recommended",
-      question: "Berangkat dari kota mana?",
+      question: "Which city are you departing from?",
       input: "text",
     });
   }
@@ -256,7 +256,7 @@ function heuristicSlotExtraction(user: string): SlotExtraction {
       id: "partySize",
       field: "partySize",
       severity: "recommended",
-      question: "Berapa orang yang pergi?",
+      question: "How many people are traveling?",
       input: "number",
     });
   }

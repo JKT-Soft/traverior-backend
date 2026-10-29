@@ -1,6 +1,17 @@
 import type { Env } from "../../../config/env.js";
 import type { PlaceProvider, PlaceResult, PlaceSearchQuery } from "../domain/ports.js";
 
+type GooglePlace = {
+  id?: string;
+  displayName?: { text?: string };
+  formattedAddress?: string;
+  location?: { latitude?: number; longitude?: number };
+  rating?: number;
+  priceLevel?: string;
+  types?: string[];
+  photos?: Array<{ name?: string }>;
+};
+
 export class GooglePlaceProvider implements PlaceProvider {
   readonly name = "google_places";
 
@@ -13,7 +24,7 @@ export class GooglePlaceProvider implements PlaceProvider {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": this.apiKey,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types",
+          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.types,places.photos",
       },
       body: JSON.stringify({
         textQuery: query.textQuery,
@@ -26,32 +37,42 @@ export class GooglePlaceProvider implements PlaceProvider {
       throw new Error(`Google Places failed (${res.status}): ${await res.text()}`);
     }
 
-    const json = (await res.json()) as {
-      places?: Array<{
-        id?: string;
-        displayName?: { text?: string };
-        formattedAddress?: string;
-        location?: { latitude?: number; longitude?: number };
-        rating?: number;
-        priceLevel?: string;
-        types?: string[];
-      }>;
-    };
+    const json = (await res.json()) as { places?: GooglePlace[] };
+    return Promise.all((json.places ?? []).map((place) => this.toPlace(place)));
+  }
 
-    return (json.places ?? []).map((p) => ({
-      contentType: "place" as const,
+  private async toPlace(place: GooglePlace): Promise<PlaceResult> {
+    return {
+      contentType: "place",
       provider: this.name,
-      providerRef: p.id,
+      providerRef: place.id,
       fetchedAt: new Date().toISOString(),
-      placeId: p.id ?? "",
-      name: p.displayName?.text ?? "Place",
-      rating: p.rating,
-      types: p.types ?? [],
-      formattedAddress: p.formattedAddress,
-      lat: p.location?.latitude,
-      lng: p.location?.longitude,
+      placeId: place.id ?? "",
+      name: place.displayName?.text ?? "Place",
+      rating: place.rating,
+      types: place.types ?? [],
+      formattedAddress: place.formattedAddress,
+      lat: place.location?.latitude,
+      lng: place.location?.longitude,
       isFree: false,
-    }));
+      thumbnailUrl: await this.photoUrl(place.photos?.[0]?.name),
+    };
+  }
+
+  private async photoUrl(photoName?: string): Promise<string | null> {
+    if (!photoName) return null;
+    try {
+      const res = await fetch(
+        `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=400&maxWidthPx=400&skipHttpRedirect=true`,
+        { headers: { "X-Goog-Api-Key": this.apiKey } },
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as { photoUri?: string };
+      const uri = json.photoUri?.trim();
+      return uri && /^https?:\/\//i.test(uri) ? uri : null;
+    } catch {
+      return null;
+    }
   }
 }
 

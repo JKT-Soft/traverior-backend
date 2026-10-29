@@ -72,11 +72,46 @@ export type FlightOffer = ProviderMeta & {
   baggage: FlightBaggageAllowance[];
   price: Money;
   slices: FlightSlice[];
+  /**
+   * Provider-specific opaque token used to open booking options
+   * (Google Flights `tfu` / price-block token).
+   */
+  bookingToken?: string;
 };
 
-/** Port — swap Duffel / Amadeus / mock without touching application code */
+export type FlightBookingOption = {
+  id: string;
+  agency: string;
+  agencyCode: string | null;
+  price: Money;
+  bookingUrl: string;
+  isAirlineDirect: boolean;
+  fareName: string | null;
+  logoUrl: string | null;
+};
+
+export type FlightOfferDetailQuery = {
+  providerRef?: string;
+  bookingToken?: string;
+  origin?: string;
+  destination?: string;
+  departureDate?: string;
+  returnDate?: string;
+  adults?: number;
+  cabinClass?: FlightSearchQuery["cabinClass"];
+  flightNumber?: string;
+  currency?: string;
+};
+
+export type FlightOfferDetail = {
+  offer: FlightOffer;
+  bookingOptions: FlightBookingOption[];
+};
+
+/** Port — swap Duffel / Aviasales / Google Flights / mock without touching application code */
 export interface FlightProvider {
   readonly name: string;
   searchFlights(query: FlightSearchQuery): Promise<FlightOffer[]>;
   getOffer?(offerId: string): Promise<FlightOffer | null>;
+  getOfferDetail?(query: FlightOfferDetailQuery): Promise<FlightOfferDetail | null>;
 }

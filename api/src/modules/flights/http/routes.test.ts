@@ -34,6 +34,25 @@ describe("flight routes", () => {
     assert.equal(offer.slices.length, 2);
     assert.ok(offer.baggage.length > 0);
 
+    const badDetail = await injectJson(app, "POST", "/offers/detail", { body: {} });
+    assert.equal(badDetail.statusCode, 400);
+
+    const detail = await injectJson(app, "POST", "/offers/detail", {
+      body: {
+        origin: "CGK",
+        destination: "KIX",
+        departureDate: "2026-10-01",
+        flightNumber: offer.flightNumber,
+        providerRef: offer.providerRef,
+      },
+    });
+    assert.equal(detail.statusCode, 200);
+    const detailData = detail.json().data;
+    assert.equal(detailData.offer.origin, "CGK");
+    assert.ok(Array.isArray(detailData.bookingOptions));
+    assert.ok(detailData.bookingOptions.length >= 1);
+    assert.match(detailData.bookingOptions[0].bookingUrl, /^https?:\/\//);
+
     await app.close();
   });
 });

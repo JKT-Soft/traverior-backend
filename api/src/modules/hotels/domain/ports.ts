@@ -40,6 +40,7 @@ export type HotelOffer = ProviderMeta & {
   nights: number;
   board: HotelBoard;
   refundable: boolean | null;
+  thumbnailUrl: string | null;
   price: Money;
 };
 

@@ -69,9 +69,16 @@ const checklistItemParams = z.object({
   itemId: z.string().min(1),
 });
 
-const updateChecklistItemSchema = z.object({
-  done: z.boolean(),
-});
+const updateChecklistItemSchema = z
+  .object({
+    done: z.boolean().optional(),
+    title: z.string().min(1).optional(),
+    category: z.string().optional(),
+  })
+  .refine(
+    (body) => body.done !== undefined || body.title !== undefined || body.category !== undefined,
+    { message: "Provide done, title, or category" },
+  );
 
 const checklistParams = z.object({
   tripId: z.string().uuid(),
@@ -80,6 +87,12 @@ const checklistParams = z.object({
 
 const addChecklistItemSchema = z.object({
   title: z.string().min(1),
+  category: z.string().optional(),
+});
+
+const createChecklistSchema = z.object({
+  title: z.string().min(1).optional(),
+  itemTitle: z.string().min(1).optional(),
   category: z.string().optional(),
 });
 
@@ -103,11 +116,28 @@ const addNodeSchema = z.object({
   deepLinkUrl: z.string().url().optional(),
   provider: z.string().optional(),
   providerRef: z.string().optional(),
+  locationLabel: z.string().optional(),
+  locationLat: z.number().optional(),
+  locationLng: z.number().optional(),
+  scheduleStart: z.string().datetime({ offset: true }).optional(),
+  scheduleEnd: z.string().datetime({ offset: true }).optional(),
+  days: z.number().int().positive().optional(),
 });
 
 const nodeParamsSchema = z.object({
   tripId: z.string().min(1),
   nodeId: z.string().uuid(),
+});
+
+const bookingParamsSchema = z.object({
+  tripId: z.string().min(1),
+  bookingId: z.string().uuid(),
+});
+
+const replaceBookingSchema = z.object({
+  kind: z.enum(["flight", "hotel", "event", "place"]).optional(),
+  replaceKey: z.string().optional(),
+  offer: z.record(z.unknown()),
 });
 
 const updateNodeSchema = z.object({
@@ -123,6 +153,11 @@ const updateNodeSchema = z.object({
   locationLat: z.number().nullable().optional(),
   locationLng: z.number().nullable().optional(),
   days: z.number().int().positive().nullable().optional(),
+  /** HH:mm for hotel check-in / display time when nodeId is a booking. */
+  timeText: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
+  /** Match a venue inside a places search booking. */
+  matchTitle: z.string().optional(),
+  providerRef: z.string().optional(),
 });
 
 const reorderNodesSchema = z.object({
@@ -383,6 +418,45 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
       },
     );
 
+    app.post<{
+      Params: { tripId: string };
+      Body: { title?: string; itemTitle?: string; category?: string };
+    }>(
+      "/:tripId/checklists",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Create a custom checklist",
+          description: "Create a user-owned checklist for the trip, optionally with a first item.",
+          params: tripIdParams,
+          paramsExample: { tripId: SAMPLE_TRIP_ID },
+          body: createChecklistSchema,
+          bodyExample: {
+            title: "My packing list",
+            itemTitle: "Universal plug adapter",
+            category: "Essentials",
+          },
+          statusCodes: [201],
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = tripIdParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const body = createChecklistSchema.safeParse(req.body ?? {});
+        if (!body.success) throw new ValidationError("Invalid body");
+        const checklist = await service.createChecklist({
+          tripId: params.data.tripId,
+          userId: user.id,
+          title: body.data.title,
+          itemTitle: body.data.itemTitle,
+          category: body.data.category,
+        });
+        return ok(reply, { checklist }, 201);
+      },
+    );
+
     app.patch<{
       Params: { tripId: string; checklistId: string; itemId: string };
     }>(
@@ -416,6 +490,8 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           checklistId: params.data.checklistId,
           itemId: params.data.itemId,
           done: body.data.done,
+          title: body.data.title,
+          category: body.data.category,
         });
         return ok(reply, { checklist });
       },
@@ -460,13 +536,46 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
       },
     );
 
+    app.delete<{
+      Params: { tripId: string; checklistId: string; itemId: string };
+    }>(
+      "/:tripId/checklists/:checklistId/items/:itemId",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Delete checklist item",
+          description: "Remove one item from catalog_checklists.items JSON for the trip.",
+          params: checklistItemParams,
+          paramsExample: {
+            tripId: SAMPLE_TRIP_ID,
+            checklistId: SAMPLE_CHECKLIST_ID,
+            itemId: SAMPLE_CHECKLIST_ITEM_ID,
+          },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = checklistItemParams.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const checklist = await service.deleteChecklistItem({
+          tripId: params.data.tripId,
+          userId: user.id,
+          checklistId: params.data.checklistId,
+          itemId: params.data.itemId,
+        });
+        return ok(reply, { checklist });
+      },
+    );
+
     app.patch<{ Params: { tripId: string; nodeId: string } }>(
       "/:tripId/nodes/:nodeId",
       {
         schema: routeDocs({
           tags: ["Trips"],
           summary: "Update trip node",
-          description: "Update title, status, lock status, schedule, or location of a stop.",
+          description:
+            "Update title, status, lock status, schedule, or location of a stop. Also accepts catalog booking IDs (hotel/event/place) from the plan response nodeId field.",
           params: nodeParamsSchema,
           paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
           body: updateNodeSchema,
@@ -487,6 +596,42 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
           ...parsed.data,
         });
         return ok(reply, { node });
+      },
+    );
+
+    app.post<{ Params: { tripId: string; bookingId: string } }>(
+      "/:tripId/bookings/:bookingId/replace",
+      {
+        schema: routeDocs({
+          tags: ["Trips"],
+          summary: "Replace a recommended booking",
+          description:
+            "Swap a flight, stay, or activity with another live search offer. Dates stay the same as the original item.",
+          params: bookingParamsSchema,
+          paramsExample: { tripId: SAMPLE_TRIP_ID, bookingId: SAMPLE_NODE_ID },
+          body: replaceBookingSchema,
+          bodyExample: {
+            kind: "hotel",
+            offer: { hotelId: "h2", name: "Osaka Riverside", checkIn: "2026-10-01", checkOut: "2026-10-03" },
+          },
+        }),
+      },
+      async (req, reply) => {
+        const auth = requireUser(req.user);
+        const user = await service.ensureUser(auth.uid, auth.email ?? `${auth.uid}@unknown`);
+        const params = bookingParamsSchema.safeParse(req.params);
+        if (!params.success) throw new ValidationError("Invalid params");
+        const parsed = replaceBookingSchema.safeParse(req.body);
+        if (!parsed.success) throw new ValidationError("Invalid body");
+        const booking = await service.replaceBooking({
+          tripId: params.data.tripId,
+          userId: user.id,
+          bookingId: params.data.bookingId,
+          kind: parsed.data.kind,
+          replaceKey: parsed.data.replaceKey,
+          offer: parsed.data.offer,
+        });
+        return ok(reply, { booking });
       },
     );
 

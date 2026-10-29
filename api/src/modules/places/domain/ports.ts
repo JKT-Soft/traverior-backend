@@ -17,6 +17,7 @@ export type PlaceResult = ProviderMeta & {
   lat?: number;
   lng?: number;
   isFree?: boolean;
+  thumbnailUrl?: string | null;
 };
 
 export interface PlaceProvider {

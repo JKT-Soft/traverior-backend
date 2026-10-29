@@ -4,6 +4,8 @@ export type ChecklistQuery = {
   countryCode?: string;
   passportCountry?: string;
   visaDocuments?: string[];
+  /** Later stops in the same country skip passport, visa, insurance, and similar once-per-country items. */
+  omitTripItems?: boolean;
 };
 
 export type ChecklistItem = {

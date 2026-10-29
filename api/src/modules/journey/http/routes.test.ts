@@ -30,6 +30,13 @@ function createPrismaMock(): {
     create: MockFn<(...args: never[]) => Promise<unknown>>;
     update: MockFn<(...args: never[]) => Promise<unknown>>;
   };
+  catalogHotel: {
+    create: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
+  booking: {
+    findFirst: MockFn<(...args: never[]) => Promise<unknown>>;
+    update: MockFn<(...args: never[]) => Promise<unknown>>;
+  };
   $transaction: MockFn<(fn: (tx: unknown) => unknown) => Promise<unknown>>;
 } {
   return {
@@ -59,6 +66,13 @@ function createPrismaMock(): {
     catalogChecklist: {
       findFirst: createMockFn(async () => null),
       create: createMockFn(async () => ({})),
+      update: createMockFn(async () => ({})),
+    },
+    catalogHotel: {
+      create: createMockFn(async () => ({ id: "hotel-cat-1" })),
+    },
+    booking: {
+      findFirst: createMockFn(async () => null),
       update: createMockFn(async () => ({})),
     },
     $transaction: createMockFn(async (fn: (tx: unknown) => unknown) => fn({})),
@@ -282,6 +296,72 @@ describe("journey http routes", () => {
     });
     assert.equal(patchRes.statusCode, 200);
 
+    // 3. Create a custom checklist
+    prismaMock.catalogChecklist.create = createMockFn(async (args: { data: { title: string; items: unknown } }) => ({
+      id: "00000000-0000-0000-0000-000000000099",
+      tripId,
+      title: args.data.title,
+      provider: "user",
+      items: args.data.items,
+      updatedAt: new Date("2026-10-14T02:00:00.000Z"),
+    }));
+    const createRes = await injectJson(app, "POST", `/${tripId}/checklists`, {
+      body: { title: "My packing list", itemTitle: "Power bank", category: "Essentials" },
+    });
+    assert.equal(createRes.statusCode, 201);
+    assert.equal(createRes.json().data.checklist.title, "My packing list");
+    assert.equal(createRes.json().data.checklist.items[0].label, "Power bank");
+
+    await app.close();
+  });
+
+  it("replaces a stay booking with a live hotel offer", async () => {
+    prismaMock.user.upsert = createMockFn(async () => ({ id: "user-1", firebaseUid: "demo" }));
+    const tripId = "00000000-0000-0000-0000-000000000001";
+    const bookingId = "00000000-0000-0000-0000-000000000003";
+    prismaMock.trip.findFirst = createMockFn(async () => ({
+      id: tripId,
+      userId: "user-1",
+      title: "Osaka",
+      baseCurrency: "IDR",
+      journey: { id: "j1", stops: [] },
+    }));
+    prismaMock.booking.findFirst = createMockFn(async () => ({
+      id: bookingId,
+      kind: "hotel",
+      stopId: "stop-1",
+      costAmount: 100,
+      costCurrency: "IDR",
+      deepLinkUrl: null,
+    }));
+    prismaMock.catalogHotel.create = createMockFn(async () => ({ id: "cat-hotel-2" }));
+    prismaMock.booking.update = createMockFn(async () => ({
+      id: bookingId,
+      kind: "hotel",
+      role: "selected",
+      deepLinkUrl: "https://example.com/hotel",
+      costAmount: 250,
+      costCurrency: "IDR",
+    }));
+
+    const { routes } = createJourneyModule({ db: prismaMock as never });
+    const app = await buildTestApp(routes, { user: { uid: "demo" } });
+    const res = await injectJson(app, "POST", `/${tripId}/bookings/${bookingId}/replace`, {
+      body: {
+        kind: "hotel",
+        offer: {
+          hotelId: "h2",
+          name: "Osaka Riverside",
+          checkIn: "2026-10-01",
+          checkOut: "2026-10-03",
+          price: { amount: 250, currency: "IDR" },
+          deepLinkUrl: "https://example.com/hotel",
+        },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().data.booking.id, bookingId);
+    assert.equal(res.json().data.booking.role, "selected");
     await app.close();
   });
 });

@@ -16,6 +16,18 @@ describe("createFlightModule / createFlightProvider", () => {
     assert.equal(createFlightModule(env).service.providerName, "duffel");
   });
 
+  it("wires aviasales provider", () => {
+    const env = loadEnv(
+      baseEnv({ PROVIDER_FLIGHTS: "aviasales", TRAVELPAYOUTS_TOKEN: "tp-token" }),
+    );
+    assert.equal(createFlightModule(env).service.providerName, "aviasales");
+  });
+
+  it("wires google flights provider", () => {
+    const env = loadEnv(baseEnv({ PROVIDER_FLIGHTS: "google" }));
+    assert.equal(createFlightModule(env).service.providerName, "google");
+  });
+
   it("throws on unknown provider", () => {
     assert.throws(
       () => createFlightModule(loadEnv(baseEnv({ PROVIDER_FLIGHTS: "nope" }))),

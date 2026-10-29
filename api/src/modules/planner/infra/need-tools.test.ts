@@ -194,31 +194,46 @@ describe("need-tools", () => {
     });
   });
 
-  it("resolves home and city airports when context omits all IATA codes", () => {
+  it("still searches flights when only skeleton carries originIata (draft path)", () => {
     const plan = buildToolPlan(
       {
-        title: "North Asia",
+        title: "Vietnam",
         originCity: "Jakarta",
+        originIata: "CGK",
         checkpoints: [
-          { city: "Tokyo", countryCode: "JP", role: "STAY", days: 2, needs: ["flights"] },
-          { city: "Taipei", countryCode: "TW", role: "STAY", days: 2, needs: ["flights"] },
-          { city: "Seoul", countryCode: "KR", role: "STAY", days: 2, needs: ["flights"] },
+          {
+            city: "Hanoi",
+            countryCode: "VN",
+            airportIata: "HAN",
+            role: "STAY",
+            days: 2,
+            needs: ["flights", "hotels"],
+          },
+          {
+            city: "Ho Chi Minh City",
+            countryCode: "VN",
+            airportIata: "SGN",
+            role: "STAY",
+            days: 2,
+            needs: ["flights", "hotels"],
+          },
         ],
       },
       {
-        departureDate: "2026-12-01",
-        returnDate: "2026-12-07",
-        checkIn: "2026-12-01",
-        checkOut: "2026-12-07",
+        // Mimic planTrip context: dates present, no IATA on the request.
+        departureDate: "2026-11-01",
+        returnDate: "2026-11-06",
+        checkIn: "2026-11-01",
+        checkOut: "2026-11-06",
+        adults: 1,
       },
     );
-
-    expectFlight(plan[0]?.calls, "CGK", "NRT", "2026-12-01");
-    expectFlight(plan[1]?.calls, "NRT", "TPE", "2026-12-04");
-    const lastFlights = plan[2]?.calls.filter((call) => call.tool === "search_flights") ?? [];
-    assert.equal(lastFlights.length, 2);
-    expectFlight([lastFlights[0]!], "TPE", "ICN", "2026-12-06");
-    expectFlight([lastFlights[1]!], "ICN", "CGK", "2026-12-07");
+    const outbound = plan[0]?.calls.find((call) => call.tool === "search_flights");
+    const inbound = plan[1]?.calls.find((call) => call.tool === "search_flights");
+    assert.equal(outbound?.arguments.origin, "CGK");
+    assert.equal(outbound?.arguments.destination, "HAN");
+    assert.equal(inbound?.arguments.origin, "SGN");
+    assert.equal(inbound?.arguments.destination, "CGK");
   });
 
   it("uses skeleton airport codes when request context omits IATA codes", () => {
@@ -268,6 +283,27 @@ describe("need-tools", () => {
     assert.equal(lastFlights.length, 2);
     expectFlight([lastFlights[0]!], "CDG", "AMS", "2026-12-06");
     expectFlight([lastFlights[1]!], "AMS", "CGK", "2026-12-07");
+  });
+
+  it("asks for trip checklist items once per destination country", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Japan and Korea",
+        checkpoints: [
+          { city: "Osaka", countryCode: "JP", role: "STAY", days: 2, needs: ["checklist"] },
+          { city: "Kyoto", countryCode: "JP", role: "STAY", days: 2, needs: ["checklist"] },
+          { city: "Seoul", countryCode: "KR", role: "STAY", days: 2, needs: ["checklist"] },
+        ],
+      },
+      {},
+    );
+
+    const checklistArgs = plan.map(
+      (entry) => entry.calls.find((call) => call.tool === "generate_checklist")?.arguments,
+    );
+    assert.equal(checklistArgs[0]?.omitTripItems, undefined);
+    assert.equal(checklistArgs[1]?.omitTripItems, true);
+    assert.equal(checklistArgs[2]?.omitTripItems, undefined);
   });
 });
 

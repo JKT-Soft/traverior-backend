@@ -118,6 +118,7 @@ export function buildToolCallsForNeed(
             destination: checkpoint.city,
             countryCode: checkpoint.countryCode,
             passportCountry: ctx.passportCountry ?? "ID",
+            ...(ctx.omitTripChecklistItems ? { omitTripItems: true } : {}),
           },
         },
       ];
@@ -135,11 +136,9 @@ export function buildToolPlan(
   ctx: PlannerToolContext,
 ): Array<{ checkpoint: SkeletonCheckpoint; calls: ToolCallSpec[] }> {
   const lastIndex = skeleton.checkpoints.length - 1;
-  const originCity = skeleton.originCity ?? DEFAULT_ORIGIN_CITY;
-  const homeIata =
-    ctx.originIata?.toUpperCase() ??
-    skeleton.originIata?.toUpperCase() ??
-    resolvePrimaryAirportIata(originCity);
+  const homeIata = ctx.originIata ?? skeleton.originIata;
+  const countriesWithTripChecklist = new Set<string>();
+  let emittedTripChecklist = false;
   const windows = allocateCheckpointWindows(skeleton.checkpoints, {
     start: ctx.checkIn ?? ctx.departureDate,
     end: ctx.checkOut ?? ctx.returnDate,
@@ -170,6 +169,19 @@ export function buildToolPlan(
         returnDate: roundTrip ? tripReturn : undefined,
       };
     }
+
+    const country = checkpoint.countryCode?.trim().toUpperCase();
+    let omitTripChecklistItems = false;
+    if (checkpoint.needs.includes("checklist")) {
+      if (country) {
+        omitTripChecklistItems = countriesWithTripChecklist.has(country);
+        countriesWithTripChecklist.add(country);
+      } else {
+        omitTripChecklistItems = emittedTripChecklist;
+        emittedTripChecklist = true;
+      }
+    }
+    localCtx = { ...localCtx, omitTripChecklistItems };
 
     const calls: ToolCallSpec[] = [];
     for (const need of checkpoint.needs) {

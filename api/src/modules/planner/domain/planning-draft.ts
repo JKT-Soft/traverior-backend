@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { PlanClarification } from "./clarifications.js";
 import {
+  DEFAULT_ORIGIN_CITY,
+  resolvePrimaryAirportIata,
+} from "./normalize-skeleton.js";
+import {
   PlanningConceptSchema,
   type PlanningConcept,
   type SkeletonCheckpoint,
@@ -202,6 +206,7 @@ export function skeletonFromDraftCard(draft: PlanningDraftCard): TripSkeleton {
     throw new Error("Draft has no stay stops");
   }
 
+  const originCity = draft.originCity?.trim() || DEFAULT_ORIGIN_CITY;
   const checkpoints: SkeletonCheckpoint[] = stays.map((stay) => {
     const search = stay.search ?? {};
     const needs = new Set(stay.needs ?? []);
@@ -216,10 +221,11 @@ export function skeletonFromDraftCard(draft: PlanningDraftCard): TripSkeleton {
     );
     if ((inboundTravel?.search?.flights ?? 0) > 0) needs.add("flights");
 
+    const city = stay.city ?? stay.name;
     return {
-      city: stay.city ?? stay.name,
+      city,
       countryCode: stay.countryCode,
-      airportIata: stay.airportIata,
+      airportIata: stay.airportIata ?? resolvePrimaryAirportIata(city),
       role: stay.checkpointRole ?? (stay.kind === "transit" ? "TRANSIT" : "STAY"),
       days: stay.nights ?? 1,
       needs: [...needs] as SkeletonCheckpoint["needs"],
@@ -249,7 +255,8 @@ export function skeletonFromDraftCard(draft: PlanningDraftCard): TripSkeleton {
     summary: draft.tone ?? undefined,
     concept: draft.concept ?? undefined,
     tone: draft.tone ?? undefined,
-    originCity: draft.originCity?.trim() || undefined,
+    originCity,
+    originIata: resolvePrimaryAirportIata(originCity),
     destinationSummary: draft.destinationSummary ?? undefined,
     assumedStartDate: draft.startDate ?? undefined,
     assumedEndDate: draft.endDate ?? undefined,

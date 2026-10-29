@@ -21,14 +21,17 @@ describe("TemplateChecklistProvider", () => {
     assert.match(result.tips[0]?.body ?? "", /Osaka/);
   });
 
-  it("adds destination-specific local items for Japan and Taiwan", async () => {
+  it("keeps only stop items when trip items are omitted", async () => {
     const p = new TemplateChecklistProvider();
-    const osaka = await p.generate({ destination: "Osaka", countryCode: "JP" });
-    assert.ok(osaka.items.some((i) => i.id === "ic-card"));
-    assert.ok(osaka.items.some((i) => i.id === "offline-maps"));
-
-    const taipei = await p.generate({ destination: "Taipei", countryCode: "TW" });
-    assert.ok(taipei.items.some((i) => i.id === "easycard"));
-    assert.ok(taipei.items.some((i) => i.id === "night-market"));
+    const result = await p.generate({
+      destination: "Kyoto",
+      visaDocuments: ["eVisa"],
+      omitTripItems: true,
+    });
+    assert.deepEqual(
+      result.items.map((item) => item.id),
+      ["hotel"],
+    );
+    assert.match(result.tips[0]?.body ?? "", /Kyoto/);
   });
 });

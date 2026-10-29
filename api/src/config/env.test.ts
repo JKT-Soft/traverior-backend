@@ -36,6 +36,12 @@ describe("loadEnv", () => {
         FIREBASE_PROJECT_ID: "p1",
         OPENAI_API_KEY: "sk",
         DUFFEL_ACCESS_TOKEN: "d",
+        TRAVELPAYOUTS_TOKEN: "tp",
+        TRAVELPAYOUTS_MARKER: "m1",
+        TRAVELPAYOUTS_CURRENCY: "idr",
+        TRAVELPAYOUTS_MARKET: "id",
+        GOOGLE_FLIGHTS_CURRENCY: "IDR",
+        GOOGLE_FLIGHTS_LANGUAGE: "id",
         LITEAPI_KEY: "l",
         GOOGLE_MAPS_API_KEY: "g",
         OPENWEATHER_API_KEY: "o",
@@ -51,6 +57,12 @@ describe("loadEnv", () => {
     assert.equal(env.firebaseWebApiKey, undefined);
     assert.equal(env.authTestLogin.enabled, true);
     assert.equal(env.secrets.duffelAccessToken, "d");
+    assert.equal(env.secrets.travelpayoutsToken, "tp");
+    assert.equal(env.secrets.travelpayoutsMarker, "m1");
+    assert.equal(env.secrets.travelpayoutsCurrency, "idr");
+    assert.equal(env.secrets.travelpayoutsMarket, "id");
+    assert.equal(env.secrets.googleFlightsCurrency, "IDR");
+    assert.equal(env.secrets.googleFlightsLanguage, "id");
     assert.equal(env.providers.flights, "duffel");
   });
 

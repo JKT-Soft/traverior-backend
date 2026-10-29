@@ -152,6 +152,7 @@ export class InProcessMcpClient implements McpToolClient {
           visaDocuments: Array.isArray(args.visaDocuments)
             ? (args.visaDocuments as string[])
             : undefined,
+          omitTripItems: args.omitTripItems === true,
         });
         return {
           data: {

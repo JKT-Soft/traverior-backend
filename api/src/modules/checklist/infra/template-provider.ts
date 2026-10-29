@@ -10,15 +10,24 @@ export class TemplateChecklistProvider implements ChecklistProvider {
   readonly name = "internal";
 
   async generate(query: ChecklistQuery): Promise<ChecklistResult> {
-    const city = query.destination.trim() || "your destination";
-    const country = query.countryCode?.trim().toUpperCase();
+    const tripItems: ChecklistItem[] = [
+      { id: "passport", label: "Passport valid 6+ months", done: false, source: "template" },
+      { id: "tickets", label: "Flight tickets printed / offline copy", done: false, source: "template" },
+      { id: "insurance", label: "Travel insurance", done: false, source: "template" },
+      { id: "adapter", label: `Power adapter for ${query.destination}`, done: false, source: "template" },
+    ];
+    const stopItems: ChecklistItem[] = [
+      { id: "hotel", label: "Hotel confirmation", done: false, source: "template" },
+    ];
 
-    const visaItems = (query.visaDocuments ?? []).map((label, i) => ({
-      id: `visa-${i}`,
-      label,
-      done: false,
-      source: "visa" as const,
-    }));
+    const visaItems = query.omitTripItems
+      ? []
+      : (query.visaDocuments ?? []).map((label, i) => ({
+          id: `visa-${i}`,
+          label,
+          done: false,
+          source: "visa" as const,
+        }));
 
     const essentials: ChecklistItem[] = [
       { id: "passport", label: "Passport valid 6+ months", done: false, source: "template" },
@@ -33,8 +42,12 @@ export class TemplateChecklistProvider implements ChecklistProvider {
     return {
       contentType: "checklist",
       provider: "internal",
-      items: [...visaItems, ...essentials, ...local],
-      tips: tipsForDestination(city, country),
+      items: [
+        ...visaItems,
+        ...(query.omitTripItems ? [] : tripItems),
+        ...stopItems,
+      ],
+      tips: tipsForDestination(query.destination),
       fetchedAt: new Date().toISOString(),
     };
   }

@@ -54,6 +54,7 @@ describe("createContainer", () => {
       "/v1/trips/{tripId}",
       "/v1/trips/{tripId}/plan",
       "/v1/trips/{tripId}/nodes",
+      "/v1/trips/{tripId}/bookings/{bookingId}/replace",
       "/v1/trips/{tripId}/alerts",
       "/v1/trips/{tripId}/alerts/check",
       "/v1/trips/monitor/run",

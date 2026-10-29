@@ -22,6 +22,11 @@ export type LiteApiPlace = {
     checkin_start?: string;
     checkin_end?: string;
   };
+  main_photo?: string;
+  mainPhoto?: string;
+  thumbnail?: string;
+  thumbnailUrl?: string;
+  hotelImages?: Array<{ url?: string; defaultImage?: boolean }>;
 };
 
 export type LiteApiRate = {
@@ -117,6 +122,7 @@ export function mapLiteApiHotel(
     nights: nightsBetween(query.checkIn, query.checkOut),
     board,
     refundable: refundableFromTag(rate?.cancellationPolicies?.refundableTag),
+    thumbnailUrl: photoFrom(meta),
     price: {
       amount,
       currency,
@@ -133,6 +139,23 @@ function locationFrom(meta: LiteApiPlace | undefined, query: HotelSearchQuery): 
     latitude: numberOrNull(meta?.latitude),
     longitude: numberOrNull(meta?.longitude),
   };
+}
+
+function photoFrom(meta: LiteApiPlace | undefined): string | null {
+  const candidates = [
+    meta?.main_photo,
+    meta?.mainPhoto,
+    meta?.thumbnailUrl,
+    meta?.thumbnail,
+    meta?.hotelImages?.find((image) => image.defaultImage)?.url,
+    meta?.hotelImages?.[0]?.url,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) {
+      return value.trim();
+    }
+  }
+  return null;
 }
 
 function boardFrom(rate?: LiteApiRate): HotelBoard {
