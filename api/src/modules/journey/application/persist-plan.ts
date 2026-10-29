@@ -5,13 +5,18 @@ import {
   hotelCheckOutIso,
   type CheckpointScheduleWindow,
 } from "../../planner/domain/checkpoint-schedule.js";
-import { DEFAULT_ORIGIN_CITY } from "../../planner/domain/normalize-skeleton.js";
+import {
+  DEFAULT_ORIGIN_CITY,
+  resolvePrimaryAirportIata,
+} from "../../planner/domain/normalize-skeleton.js";
 import type { SkeletonCheckpoint, TripSkeleton } from "../../planner/domain/skeleton.js";
 import type { McpToolResult } from "../../../shared/mcp/index.js";
+import { resolveOfferDeepLink } from "../../../shared/deep-link.js";
 
 export type BuildPlanDraftsOptions = {
   originCity?: string;
   returnCity?: string;
+  originIata?: string;
   startDate?: string;
   endDate?: string;
 };
@@ -230,32 +235,39 @@ function bookingFromTool(
       const offer = asRecord(firstArrayItem(data.offers));
       if (!offer) return null;
       const money = moneyFromUnknown(offer.price);
+      const payload = { ...offer, provider };
       return {
         path,
         kind: "flight",
         role: "selected",
         provider,
-        providerRef: typeof offer.id === "string" ? offer.id : undefined,
-        deepLinkUrl: typeof offer.deepLink === "string" ? offer.deepLink : undefined,
+        providerRef:
+          typeof offer.providerRef === "string"
+            ? offer.providerRef
+            : typeof offer.id === "string"
+              ? offer.id
+              : undefined,
+        deepLinkUrl: resolveOfferDeepLink("flight", payload),
         costAmount: money?.amount,
         costCurrency: money?.currency,
-        payload: { ...offer, provider },
+        payload,
       };
     }
     case "search_hotels": {
       const hotel = asRecord(firstArrayItem(data.hotels));
       if (!hotel) return null;
       const money = moneyFromUnknown(hotel.price);
+      const payload = applyWindow({ ...hotel, provider }, window, "hotel");
       return {
         path,
         kind: "hotel",
         role: "selected",
         provider,
         providerRef: typeof hotel.hotelId === "string" ? hotel.hotelId : undefined,
-        deepLinkUrl: typeof hotel.deepLink === "string" ? hotel.deepLink : undefined,
+        deepLinkUrl: resolveOfferDeepLink("hotel", payload),
         costAmount: money?.amount,
         costCurrency: money?.currency,
-        payload: applyWindow({ ...hotel, provider }, window, "hotel"),
+        payload,
       };
     }
     case "search_events":
@@ -263,16 +275,17 @@ function bookingFromTool(
       const event = asRecord(firstArrayItem(data.events));
       if (!event) return null;
       const money = moneyFromUnknown(event.price);
+      const payload = { ...event, provider };
       return {
         path,
         kind: "event",
         role: "recommended",
         provider,
         providerRef: typeof event.id === "string" ? event.id : typeof event.externalId === "string" ? event.externalId : undefined,
-        deepLinkUrl: typeof event.deepLink === "string" ? event.deepLink : undefined,
+        deepLinkUrl: resolveOfferDeepLink("event", payload),
         costAmount: money?.amount,
         costCurrency: money?.currency,
-        payload: { ...event, provider },
+        payload,
       };
     }
     case "search_restaurants":
@@ -325,6 +338,23 @@ function bookingFromTool(
   }
 }
 
+function flightRouteOf(booking: PlanBookingDraft): { origin?: string; destination?: string } {
+  const payload = booking.payload;
+  const origin =
+    typeof payload.origin === "string"
+      ? payload.origin.toUpperCase()
+      : typeof (payload.originAirport as { code?: string } | undefined)?.code === "string"
+        ? (payload.originAirport as { code: string }).code.toUpperCase()
+        : undefined;
+  const destination =
+    typeof payload.destination === "string"
+      ? payload.destination.toUpperCase()
+      : typeof (payload.destinationAirport as { code?: string } | undefined)?.code === "string"
+        ? (payload.destinationAirport as { code: string }).code.toUpperCase()
+        : undefined;
+  return { origin, destination };
+}
+
 /** Top-level hub / travel / stay graph. Catalog offers hang off bookings, not child stops. */
 export function buildPlanDrafts(
   skeleton: TripSkeleton,
@@ -335,13 +365,18 @@ export function buildPlanDrafts(
   const usedSlugs = new Set<string>();
   const originCity = options.originCity ?? skeleton.originCity ?? DEFAULT_ORIGIN_CITY;
   const returnCity = options.returnCity ?? originCity;
+  const homeIata = (
+    options.originIata ??
+    skeleton.originIata ??
+    resolvePrimaryAirportIata(originCity)
+  )?.toUpperCase();
   const destinations = skeleton.checkpoints;
   const windows = allocateCheckpointWindows(destinations, {
     start: options.startDate,
     end: options.endDate,
   });
-  const firstWindow = windows.find((window) => window != null) ?? null;
   const lastWindow = [...windows].reverse().find((window) => window != null) ?? null;
+  const pendingReturnFlights: PlanBookingDraft[] = [];
 
   if (originCity && destinations.length > 0) {
     stops.push(hubStop(usedSlugs, originCity, "origin", options.startDate));
@@ -385,7 +420,28 @@ export function buildPlanDrafts(
     const results = execution.checkpoints[index]?.results ?? [];
     results.forEach((result, toolIndex) => {
       const childSlug = `${slugify(result.tool)}_${toolIndex + 1}`;
-      const target = result.tool === "search_flights" && inbound ? inbound : stay;
+      if (result.tool === "search_flights") {
+        // Temporary path; rewritten below once the travel target is known.
+        const built = bookingsFromTool(`journey/pending_flight`, result, childSlug, window);
+        for (const booking of built.bookings) {
+          const route = flightRouteOf(booking);
+          const isReturn =
+            homeIata != null &&
+            route.destination === homeIata &&
+            (!route.origin || route.origin !== homeIata);
+          if (isReturn) {
+            pendingReturnFlights.push(booking);
+          } else {
+            const target = inbound ?? stay;
+            booking.path = `${target.path}/${childSlug}`;
+            target.bookings.push(booking);
+          }
+        }
+        stay.notes.push(...built.notes);
+        return;
+      }
+
+      const target = stay;
       const built = bookingsFromTool(target.path, result, childSlug, window);
       target.bookings.push(...built.bookings);
       stay.notes.push(...built.notes);
@@ -398,15 +454,27 @@ export function buildPlanDrafts(
   if (returnCity && destinations.length > 0) {
     const lastDestination = destinations[destinations.length - 1]!;
     if (!citiesEqual(lastDestination.city, returnCity)) {
-      stops.push(
-        travelStop(
-          usedSlugs,
-          "travel_return",
-          `Return to ${returnCity}`,
-          `From ${lastDestination.city}`,
-          lastWindow?.end ?? options.endDate,
-        ),
+      const returnTravel = travelStop(
+        usedSlugs,
+        "travel_return",
+        `Return to ${returnCity}`,
+        `From ${lastDestination.city}`,
+        lastWindow?.end ?? options.endDate,
       );
+      for (const [index, booking] of pendingReturnFlights.entries()) {
+        booking.path = `${returnTravel.path}/search_flights_return_${index + 1}`;
+        returnTravel.bookings.push(booking);
+      }
+      stops.push(returnTravel);
+    } else {
+      // Nowhere to hang return flights if home == last destination.
+      const lastStay = [...stops].reverse().find((stop) => stop.kind === "stay" || stop.kind === "transit");
+      if (lastStay) {
+        for (const booking of pendingReturnFlights) {
+          booking.path = `${lastStay.path}/search_flights_return`;
+          lastStay.bookings.push(booking);
+        }
+      }
     }
     stops.push(hubStop(usedSlugs, returnCity, "return", options.endDate ?? lastWindow?.end));
   }

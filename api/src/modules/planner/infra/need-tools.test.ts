@@ -60,13 +60,27 @@ describe("need-tools", () => {
     assert.equal(plan[1]?.calls[0]?.arguments.checkOut, "2026-10-05");
   });
 
-  it("searches outbound on first city and return (swapped) on last", () => {
+  it("searches outbound on first city, inbound hop + return on last", () => {
     const plan = buildToolPlan(
       {
         title: "Japan",
         checkpoints: [
-          { city: "Tokyo", countryCode: "JP", role: "STAY", days: 3, needs: ["flights"] },
-          { city: "Osaka", countryCode: "JP", role: "STAY", days: 2, needs: ["flights"] },
+          {
+            city: "Tokyo",
+            countryCode: "JP",
+            airportIata: "NRT",
+            role: "STAY",
+            days: 3,
+            needs: ["flights"],
+          },
+          {
+            city: "Osaka",
+            countryCode: "JP",
+            airportIata: "KIX",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
         ],
       },
       {
@@ -80,7 +94,7 @@ describe("need-tools", () => {
     );
 
     const outbound = plan[0]?.calls.find((c) => c.tool === "search_flights");
-    const inbound = plan[1]?.calls.find((c) => c.tool === "search_flights");
+    const lastFlights = plan[1]?.calls.filter((c) => c.tool === "search_flights") ?? [];
 
     assert.deepEqual(outbound?.arguments, {
       origin: "CGK",
@@ -89,13 +103,68 @@ describe("need-tools", () => {
       returnDate: undefined,
       adults: 1,
     });
-    assert.deepEqual(inbound?.arguments, {
+    assert.equal(lastFlights.length, 2);
+    assert.deepEqual(lastFlights[0]?.arguments, {
       origin: "NRT",
+      destination: "KIX",
+      departureDate: "2026-10-06",
+      returnDate: undefined,
+      adults: 1,
+    });
+    assert.deepEqual(lastFlights[1]?.arguments, {
+      origin: "KIX",
       destination: "CGK",
       departureDate: "2026-10-08",
       returnDate: undefined,
       adults: 1,
     });
+  });
+
+  it("skips inbound hop on last city when airport is unchanged (rail belt)", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Japan rail",
+        checkpoints: [
+          {
+            city: "Tokyo",
+            countryCode: "JP",
+            airportIata: "NRT",
+            role: "STAY",
+            days: 3,
+            needs: ["flights"],
+          },
+          {
+            city: "Kyoto",
+            countryCode: "JP",
+            airportIata: "KIX",
+            role: "STAY",
+            days: 2,
+            needs: [],
+          },
+          {
+            city: "Osaka",
+            countryCode: "JP",
+            airportIata: "KIX",
+            role: "STAY",
+            days: 2,
+            needs: ["flights"],
+          },
+        ],
+      },
+      {
+        originIata: "CGK",
+        checkIn: "2026-10-01",
+        checkOut: "2026-10-08",
+        departureDate: "2026-10-01",
+        returnDate: "2026-10-08",
+      },
+    );
+
+    expectFlight(plan[0]?.calls, "CGK", "NRT", "2026-10-01");
+    assert.equal(plan[1]?.calls.some((c) => c.tool === "search_flights"), false);
+    const lastFlights = plan[2]?.calls.filter((c) => c.tool === "search_flights") ?? [];
+    assert.equal(lastFlights.length, 1);
+    expectFlight(lastFlights, "KIX", "CGK", "2026-10-08");
   });
 
   it("uses round-trip search for a single-city trip", () => {
@@ -210,7 +279,10 @@ describe("need-tools", () => {
 
     expectFlight(plan[0]?.calls, "CGK", "LHR", "2026-12-01");
     expectFlight(plan[1]?.calls, "LHR", "CDG", "2026-12-04");
-    expectFlight(plan[2]?.calls, "AMS", "CGK", "2026-12-07");
+    const lastFlights = plan[2]?.calls.filter((call) => call.tool === "search_flights") ?? [];
+    assert.equal(lastFlights.length, 2);
+    expectFlight([lastFlights[0]!], "CDG", "AMS", "2026-12-06");
+    expectFlight([lastFlights[1]!], "AMS", "CGK", "2026-12-07");
   });
 
   it("asks for trip checklist items once per destination country", () => {

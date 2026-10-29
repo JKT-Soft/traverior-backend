@@ -1,3 +1,4 @@
+import { hotelSearchDeepLink } from "../../../shared/deep-link.js";
 import type { HotelBoard, HotelLocation, HotelOffer, HotelSearchQuery } from "../domain/ports.js";
 
 export type LiteApiPlace = {
@@ -94,13 +95,21 @@ export function mapLiteApiHotel(
   const times = meta?.checkinCheckoutTimes;
   const board = boardFrom(rate);
 
+  const name = meta?.name ?? row.hotelId ?? "Hotel";
   return {
     contentType: "hotel",
     provider,
     providerRef: row.hotelId,
     fetchedAt: new Date().toISOString(),
+    // Native LiteAPI links need a white-label domain; use Google Hotels as View offer.
+    deepLinkUrl: hotelSearchDeepLink({
+      name,
+      city: location.city,
+      checkIn: query.checkIn,
+      checkOut: query.checkOut,
+    }),
     hotelId: row.hotelId ?? "unknown",
-    name: meta?.name ?? row.hotelId ?? "Hotel",
+    name,
     location,
     address: location.address ?? undefined,
     stars: numberOrNull(meta?.stars ?? meta?.starRating),

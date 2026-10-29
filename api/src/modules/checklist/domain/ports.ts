@@ -1,5 +1,7 @@
 export type ChecklistQuery = {
   destination: string;
+  /** ISO 3166-1 alpha-2 when known — used for destination-specific packing items. */
+  countryCode?: string;
   passportCountry?: string;
   visaDocuments?: string[];
   /** Later stops in the same country skip passport, visa, insurance, and similar once-per-country items. */

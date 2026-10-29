@@ -22,6 +22,7 @@ import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
 import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlanSkeletonInput, TripSkeleton } from "../../planner/domain/skeleton.js";
+import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromStops, coverLocationFromTrip } from "./cover-image.js";
 import { serializeTrip } from "./serialize-trip.js";
@@ -1830,6 +1831,9 @@ export class JourneyService {
         departureDate: dates.start,
         returnDate: dates.end,
         ...input.context,
+        originIata: input.context?.originIata ?? skeleton.originIata,
+        destinationIata:
+          input.context?.destinationIata ?? skeleton.checkpoints[0]?.airportIata,
       };
 
       const execution = executeTools
@@ -1846,6 +1850,7 @@ export class JourneyService {
         buildPlanDrafts(skeleton, execution, {
           originCity: skeleton.originCity,
           returnCity: skeleton.originCity,
+          originIata: skeleton.originIata ?? context.originIata,
           startDate: dates.start,
           endDate: dates.end,
         }),

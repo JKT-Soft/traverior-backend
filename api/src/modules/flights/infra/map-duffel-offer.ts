@@ -1,3 +1,4 @@
+import { flightSearchDeepLink } from "../../../shared/deep-link.js";
 import type {
   FlightAirline,
   FlightAirport,
@@ -84,7 +85,13 @@ export function mapDuffelOffer(
     provider,
     providerRef: offer.id,
     fetchedAt: new Date().toISOString(),
-    deepLinkUrl: undefined,
+    // Duffel search offers have no public checkout URL; open a flight search instead.
+    deepLinkUrl: flightSearchDeepLink({
+      origin: outbound.origin.code,
+      destination: outbound.destination.code,
+      departureDate: outbound.departureAt,
+      returnDate: slices[1]?.departureAt ?? query.returnDate,
+    }),
     airline: firstSegment?.airline ?? unknownAirline(),
     carrier: firstSegment?.airline.name ?? unknownAirline().name,
     flightNumber: firstSegment?.flightNumber ?? "",

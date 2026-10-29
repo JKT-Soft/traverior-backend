@@ -31,6 +31,7 @@ const PRIMARY_AIRPORT_BY_CITY: Record<string, string> = {
   seoul: "ICN",
   singapore: "SIN",
   sydney: "SYD",
+  taipe: "TPE",
   taipei: "TPE",
   tokyo: "NRT",
 };
