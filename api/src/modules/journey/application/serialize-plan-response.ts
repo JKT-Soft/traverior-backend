@@ -229,20 +229,49 @@ export function serializePlanResponse(input: {
       const cost = budgetFrom(booking.costAmount, booking.costCurrency, booking.costIsEstimate, currency);
       if (booking.kind === "flight") {
         const id = `flt_${citySlug}_${++flightNo}`;
-        catalog.flights[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Flight"), cost };
+        catalog.flights[id] = {
+          ...content,
+          id,
+          nodeId: booking.id,
+          title: textTitle(row, "Flight"),
+          cost,
+          isLocked: content.isLocked === true,
+        };
         flightIds.push(id);
       } else if (booking.kind === "hotel") {
         const id = `htl_${citySlug}_${++hotelNo}`;
-        catalog.hotels[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Hotel"), cost };
+        catalog.hotels[id] = {
+          ...content,
+          id,
+          nodeId: booking.id,
+          title: textTitle(row, "Hotel"),
+          cost,
+          isLocked: content.isLocked === true,
+        };
         hotelIds.push(id);
       } else if (booking.kind === "event") {
         const id = `evt_${citySlug}_${++eventNo}`;
-        catalog.events[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, "Event"), cost };
+        catalog.events[id] = {
+          ...content,
+          id,
+          nodeId: booking.id,
+          title: textTitle(row, "Event"),
+          cost,
+          isLocked: content.isLocked === true,
+        };
         eventIds.push(id);
       } else if (booking.kind === "place") {
         const kind = row?.kind === "restaurants" ? "restaurants" : "pois";
         const id = `plc_${kind}_${citySlug}_${++placeNo}`;
-        catalog.places[id] = { ...content, id, nodeId: booking.id, title: textTitle(row, kind), kind, cost };
+        catalog.places[id] = {
+          ...content,
+          id,
+          nodeId: booking.id,
+          title: textTitle(row, kind),
+          kind,
+          cost,
+          isLocked: content.isLocked === true,
+        };
         placeIds.push(id);
       } else if (booking.kind === "route") {
         const id = `rte_${citySlug}_${++routeNo}`;

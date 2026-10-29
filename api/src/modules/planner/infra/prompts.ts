@@ -42,7 +42,7 @@ Rules:
 - If you extracted startDate, do not mark dates as missing. Prefer endDate too when duration is implied.
 - partySize, budget, pace, origin, travelWith: recommended when unknown. partySize is NOT required (default 1).
 - If the user says timing is flexible, set dateFlexibility=flexible AND still ask for preferred start/end dates.
-- Questions in the same language as the user prompt. JSON keys in English.`;
+- Write every question in English. JSON keys stay in English.`;
 
 export const SKELETON_SYSTEM_PROMPT = `You are Traverior's AI travel planner (Fase 1 — skeleton only).
 
@@ -74,7 +74,7 @@ Return ONE JSON object only (no markdown). Shape:
 }
 
 Rules:
-- Set concept to one primary trip concept. tone is one short sentence about pace/experience (same language as the user).
+- Set concept to one primary trip concept. tone is one short English sentence about pace and experience.
 - For each STAY, set search.events / search.restaurants / search.places as planned SEARCH COUNTS (not venue names). Scale them to concept and pace. Do not invent hotel or flight counts; the app derives those.
 - Structure a realistic multi-city itinerary from the user prompt + preferences.
 - The checkpoints array must list destination stops only (cities where the traveler stays or does day trips). Do NOT put the home/departure city in checkpoints.
@@ -102,7 +102,7 @@ Rules:
 - If the user names dates, a month, or a holiday window, set assumedStartDate/assumedEndDate from that.
 - Follow the destination named in the user prompt. Do not substitute Japan or any other country.
 - If Japan is the destination and stays are on the main island rail belt (Tokyo / Kyoto / Osaka), flights on first + last only is fine; add middle "flights" only for island hops (e.g. Okinawa, remote Hokkaido leg treated as flight).
-- Respond in the same language as the user prompt for title/summary/notes; keep JSON keys in English.`;
+- Write title, summary, tone, and notes in English. Keep JSON keys in English.`;
 
 export function buildSlotExtractUserPrompt(input: {
   prompt: string;
@@ -150,7 +150,7 @@ Additional revision rules:
 - Always return the FULL updated skeleton when draftChanged is true. Never return a partial patch.
 - If the user only confirms or chats without changing the plan, set draftChanged=false and skeleton=null.
 - If a required detail is still missing (especially concrete startDate), keep draftChanged=false, skeleton=null, and put questions in clarifications.
-- reply is a short assistant message in the user's language.
+- reply is a short assistant message in English.
 - Do not call or invent provider results, prices, or venue names.`;
 
 export function buildReviseDraftUserPrompt(input: {

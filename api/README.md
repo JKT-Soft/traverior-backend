@@ -29,7 +29,11 @@ src/
 **Swap a provider** without touching domain code:
 
 ```env
-PROVIDER_FLIGHTS=duffel   # or mock | aviasales (needs TRAVELPAYOUTS_TOKEN)
+PROVIDER_FLIGHTS=duffel   # or mock | aviasales (TRAVELPAYOUTS_TOKEN) | google (Google Flights scrape)
+# Flights offer detail: POST /v1/flights/offers/detail (vendor booking options + itinerary)
+# When PROVIDER_FLIGHTS=google, install Chromium once for Playwright booking capture
+# (View offer vendors; first call ~15–45s while Chromium warms):
+#   npx playwright install chromium
 PROVIDER_HOTELS=liteapi   # or mock
 PROVIDER_PLACES=google    # or mock
 PROVIDER_ROUTES=google    # or mock
@@ -48,6 +52,7 @@ docker compose up -d postgres
 cd services/api
 cp .env.example .env
 npm install
+npx playwright install chromium   # Google Flights booking options (PROVIDER_FLIGHTS=google)
 npx prisma migrate dev --name init
 npm run dev
 ```

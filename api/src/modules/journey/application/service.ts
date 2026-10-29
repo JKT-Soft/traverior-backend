@@ -20,6 +20,7 @@ import type { CostService } from "../../cost/service.js";
 import type { ImageService } from "../../images/index.js";
 import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
+import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlanSkeletonInput, TripSkeleton } from "../../planner/domain/skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromStops, coverLocationFromTrip } from "./cover-image.js";
@@ -29,6 +30,7 @@ import { mergePlanPreferences, type StoredTravelPreference } from "./merge-plan-
 import { buildPlanDrafts, slugify, type PlanMediaDraft, type PlanStopDraft } from "./persist-plan.js";
 import { createCatalogLink } from "./write-catalog.js";
 import { resolvePlanDates } from "../../planner/domain/clarifications.js";
+import { allocateCheckpointWindows, atUtcNoon } from "../../planner/domain/checkpoint-schedule.js";
 import {
   applyPlanAnswers,
   ensureCriticalClarifications,
@@ -432,7 +434,7 @@ export class JourneyService {
           {
             role: "assistant",
             kind: "text",
-            body: "Ada beberapa detail yang masih dibutuhkan sebelum rancangan bisa dilanjutkan.",
+            body: "A few details are still needed before this draft can continue.",
           },
           ...required.map((clarification) => ({
             role: "assistant" as const,
@@ -464,8 +466,8 @@ export class JourneyService {
       const nextDraft = applySelectedStop(draftCardFromSkeleton(skeleton), input.stopId);
       const reply =
         nextDraft.concept && nextDraft.tone
-          ? `Konsepnya ${nextDraft.concept}. ${nextDraft.tone} Ini rancangannya.`
-          : "Ini rancangan perjalanannya. Penerbangan dan hotel belum dicari.";
+          ? `This is a ${nextDraft.concept} trip. ${nextDraft.tone} Here's the draft.`
+          : "Here's the trip draft. Flights and hotels have not been searched yet.";
       assistantMessages = [
         { role: "assistant", kind: "text", body: reply },
         {
@@ -622,7 +624,7 @@ export class JourneyService {
           position,
           role: "assistant",
           kind: "text",
-          body: "Pencarian dimulai. Penerbangan, hotel, dan detail lainnya sedang dicari.",
+          body: "Search started. Flights, hotels, and the rest of the details are being looked up.",
         },
       });
       await this.db.planningDraft.update({
@@ -734,6 +736,12 @@ export class JourneyService {
     providerRef?: string;
     origin?: "ai" | "user" | "api";
     isCustom?: boolean;
+    locationLabel?: string;
+    locationLat?: number;
+    locationLng?: number;
+    scheduleStart?: string;
+    scheduleEnd?: string;
+    days?: number;
   }) {
     const trip = await this.getTrip(input.tripId, input.userId);
     const journey = trip.journey;
@@ -750,22 +758,34 @@ export class JourneyService {
     const slug = unusedSlug(slugify(input.title), used);
     const kind = nodeTypeToKind(input.type);
     const parentPath = parentStop?.path ?? "journey";
+    const isTopLevelHub = !parentStop && kind === "hub";
     const stop = await this.db.stop.create({
       data: {
         journeyId: journey.id,
         parentStopId: parentStop?.id ?? null,
         kind,
-        hubRole: kind === "hub" ? "origin" : null,
+        hubRole: null,
         slug,
         name: input.title,
         sortOrder: siblings.length,
         depth: parentStop ? parentStop.depth + 1 : 0,
         path: `${parentPath}/${slug}`,
-        city: input.title,
+        city: input.locationLabel ?? input.title,
+        locationLabel: input.locationLabel ?? input.title,
+        locationLat: input.locationLat,
+        locationLng: input.locationLng,
+        scheduleStart: input.scheduleStart ? new Date(input.scheduleStart) : undefined,
+        scheduleEnd: input.scheduleEnd ? new Date(input.scheduleEnd) : undefined,
+        days: input.days ?? (isTopLevelHub ? 2 : null),
         origin: input.origin ?? "user",
         isCustom: input.isCustom ?? true,
       },
     });
+
+    if (isTopLevelHub) {
+      await this.reallocateHubWindows(trip.id, journey.id);
+      if (this.cost) await this.cost.rollupTrip(input.tripId);
+    }
 
     await this.invalidateUserTrips(input.userId, input.tripId, input.parentId);
     return stopAsNode(stop, journey.id);
@@ -787,6 +807,9 @@ export class JourneyService {
     locationLat?: number | null;
     locationLng?: number | null;
     days?: number | null;
+    timeText?: string;
+    matchTitle?: string;
+    providerRef?: string;
   }) {
     const trip = await this.getTrip(input.tripId, input.userId);
     const journey = trip.journey;
@@ -800,7 +823,23 @@ export class JourneyService {
       },
     });
     if (!existing) {
-      throw new NotFoundError("Node not found in trip");
+      // Plan UI uses booking.id as nodeId for hotel/event/place catalog cards.
+      return this.updateBookingNode({
+        tripId: input.tripId,
+        userId: input.userId,
+        journeyId: journey.id,
+        bookingId: input.nodeId,
+        title: input.title,
+        subtitle: input.subtitle,
+        isLocked: input.isLocked,
+        scheduleStart: input.scheduleStart,
+        timeText: input.timeText,
+        matchTitle: input.matchTitle,
+        providerRef: input.providerRef,
+        locationLabel: input.locationLabel,
+        locationLat: input.locationLat,
+        locationLng: input.locationLng,
+      });
     }
 
     const beforeData = {
@@ -1116,6 +1155,177 @@ export class JourneyService {
     });
   }
 
+  /**
+   * Catalog cards in the plan response expose booking.id as nodeId.
+   * Edit / lock those through the booking + catalog row, not Stop.
+   */
+  private async updateBookingNode(input: {
+    tripId: string;
+    userId: string;
+    journeyId: string;
+    bookingId: string;
+    title?: string;
+    subtitle?: string | null;
+    isLocked?: boolean;
+    scheduleStart?: string | null;
+    timeText?: string;
+    matchTitle?: string;
+    providerRef?: string;
+    locationLabel?: string | null;
+    locationLat?: number | null;
+    locationLng?: number | null;
+  }) {
+    const booking = await this.db.booking.findFirst({
+      where: {
+        id: input.bookingId,
+        stop: { journeyId: input.journeyId, deletedAt: null },
+      },
+      include: {
+        hotel: true,
+        event: true,
+        place: true,
+        flight: true,
+        stop: true,
+      },
+    });
+    if (!booking) {
+      throw new NotFoundError("Node not found in trip");
+    }
+
+    const locationLabel =
+      input.locationLabel !== undefined ? input.locationLabel : input.subtitle;
+    let title = input.title;
+    let isLocked = false;
+
+    if (booking.kind === "hotel" && booking.catalogHotelId) {
+      const raw = mergeRawLock(booking.hotel?.raw, input.isLocked);
+      isLocked = rawLocked(raw);
+      await this.db.catalogHotel.update({
+        where: { id: booking.catalogHotelId },
+        data: {
+          ...(input.title !== undefined ? { name: input.title } : {}),
+          ...(locationLabel !== undefined ? { address: locationLabel } : {}),
+          ...(input.locationLat !== undefined ? { lat: input.locationLat } : {}),
+          ...(input.locationLng !== undefined ? { lng: input.locationLng } : {}),
+          ...(input.timeText !== undefined ? { checkInTime: input.timeText } : {}),
+          ...(input.scheduleStart !== undefined
+            ? {
+                checkIn: input.scheduleStart
+                  ? dayOrUndefined(input.scheduleStart.slice(0, 10))
+                  : undefined,
+              }
+            : {}),
+          raw: raw as Prisma.InputJsonValue,
+        },
+      });
+      title = input.title ?? booking.hotel?.name ?? "Hotel";
+    } else if (booking.kind === "event" && booking.catalogEventId) {
+      const raw = mergeRawLock(booking.event?.raw, input.isLocked);
+      isLocked = rawLocked(raw);
+      await this.db.catalogEvent.update({
+        where: { id: booking.catalogEventId },
+        data: {
+          ...(input.title !== undefined ? { name: input.title } : {}),
+          ...(locationLabel !== undefined ? { address: locationLabel, venueName: locationLabel } : {}),
+          ...(input.locationLat !== undefined ? { lat: input.locationLat } : {}),
+          ...(input.locationLng !== undefined ? { lng: input.locationLng } : {}),
+          ...(input.scheduleStart !== undefined
+            ? { startsAt: input.scheduleStart ? new Date(input.scheduleStart) : null }
+            : {}),
+          raw: raw as Prisma.InputJsonValue,
+        },
+      });
+      title = input.title ?? booking.event?.name ?? "Event";
+    } else if (booking.kind === "place" && booking.catalogPlaceId) {
+      const placeRow = booking.place;
+      const raw = mergeRawLock(placeRow?.raw, input.isLocked);
+      isLocked = rawLocked(raw);
+      const places = Array.isArray(placeRow?.places)
+        ? [...(placeRow!.places as unknown[])]
+        : [];
+      const matchTitle = input.matchTitle?.trim().toLowerCase();
+      const providerRef = input.providerRef?.trim();
+      let updatedPlaces = places;
+      if (input.title !== undefined || locationLabel !== undefined) {
+        updatedPlaces = places.map((entry) => {
+          const row = entry && typeof entry === "object" ? { ...(entry as Record<string, unknown>) } : null;
+          if (!row) return entry;
+          const name = String(row.name ?? row.title ?? "").trim().toLowerCase();
+          const ref = String(row.placeId ?? row.providerRef ?? row.id ?? "").trim();
+          const matched =
+            (providerRef && ref === providerRef) ||
+            (matchTitle && name === matchTitle) ||
+            (!providerRef && !matchTitle && places.length === 1);
+          if (!matched) return entry;
+          if (input.title !== undefined) {
+            row.name = input.title;
+            row.title = input.title;
+          }
+          if (locationLabel !== undefined && locationLabel !== null) {
+            row.formattedAddress = locationLabel;
+            row.address = locationLabel;
+          }
+          if (input.locationLat !== undefined) row.lat = input.locationLat;
+          if (input.locationLng !== undefined) row.lng = input.locationLng;
+          return row;
+        });
+      }
+      await this.db.catalogPlace.update({
+        where: { id: booking.catalogPlaceId },
+        data: {
+          ...(input.title !== undefined && !matchTitle && !providerRef
+            ? { title: input.title }
+            : {}),
+          places: updatedPlaces as Prisma.InputJsonValue,
+          raw: raw as Prisma.InputJsonValue,
+        },
+      });
+      title = input.title ?? placeRow?.title ?? "Place";
+    } else if (booking.kind === "flight" && booking.catalogFlightId) {
+      const raw = mergeRawLock(booking.flight?.raw, input.isLocked);
+      isLocked = rawLocked(raw);
+      await this.db.catalogFlight.update({
+        where: { id: booking.catalogFlightId },
+        data: {
+          ...(input.scheduleStart !== undefined
+            ? { departureAt: input.scheduleStart ? new Date(input.scheduleStart) : null }
+            : {}),
+          raw: raw as Prisma.InputJsonValue,
+        },
+      });
+      title = input.title ?? booking.flight?.airlineName ?? booking.flight?.carrier ?? "Flight";
+    } else if (input.isLocked !== undefined) {
+      throw new ValidationError("This booking type cannot be locked");
+    } else {
+      throw new ValidationError("This booking type cannot be edited");
+    }
+
+    await this.invalidateUserTrips(input.userId, input.tripId, booking.stopId);
+    return {
+      id: booking.id,
+      parentId: booking.stopId,
+      depth: 1,
+      path: "",
+      type: booking.kind === "hotel" ? "BOOKING" : "ACTIVITY",
+      checkpointKind: null,
+      title,
+      subtitle: locationLabel ?? null,
+      status: "planned",
+      sortOrder: booking.sortOrder ?? 0,
+      scheduleStart: input.scheduleStart ? new Date(input.scheduleStart) : null,
+      scheduleEnd: null,
+      locationLat: input.locationLat ?? null,
+      locationLng: input.locationLng ?? null,
+      locationLabel: locationLabel ?? null,
+      contentType: booking.kind,
+      content: {},
+      costAmount: 0,
+      costCurrency: "IDR",
+      isLocked,
+      isCustom: booking.origin === "user",
+    };
+  }
+
   async deleteNode(input: {
     tripId: string;
     userId: string;
@@ -1133,7 +1343,18 @@ export class JourneyService {
       },
     });
     if (!existing) {
-      throw new NotFoundError("Node not found in trip");
+      const booking = await this.db.booking.findFirst({
+        where: {
+          id: input.nodeId,
+          stop: { journeyId: journey.id, deletedAt: null },
+        },
+      });
+      if (!booking) {
+        throw new NotFoundError("Node not found in trip");
+      }
+      await this.db.booking.delete({ where: { id: booking.id } });
+      await this.invalidateUserTrips(input.userId, input.tripId, booking.stopId);
+      return { id: booking.id, deleted: true };
     }
 
     const now = new Date();
@@ -1173,6 +1394,11 @@ export class JourneyService {
       });
     } catch {
       // non-fatal
+    }
+
+    if (existing.parentStopId == null && existing.kind === "hub") {
+      await this.reallocateHubWindows(trip.id, journey.id);
+      if (this.cost) await this.cost.rollupTrip(input.tripId);
     }
 
     await this.invalidateUserTrips(input.userId, input.tripId, existing.parentStopId);
@@ -1229,8 +1455,59 @@ export class JourneyService {
       }
     });
 
+    const reorderedHubs = stops.some((stop) => stop.parentStopId == null && stop.kind === "hub");
+    if (reorderedHubs) {
+      await this.reallocateHubWindows(trip.id, journey.id);
+      if (this.cost) await this.cost.rollupTrip(input.tripId);
+    }
+
     await this.invalidateUserTrips(input.userId, input.tripId, input.parentId ?? null);
     return { success: true };
+  }
+
+  /** Cheap cascade: redistribute date windows across remaining top-level hubs. */
+  private async reallocateHubWindows(tripId: string, journeyId: string): Promise<void> {
+    const trip = await this.db.trip.findUnique({
+      where: { id: tripId },
+      select: { startDate: true, endDate: true },
+    });
+    if (!trip?.startDate) return;
+
+    const hubs = await this.db.stop.findMany({
+      where: {
+        journeyId,
+        parentStopId: null,
+        deletedAt: null,
+        kind: "hub",
+        hubRole: null,
+      },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, days: true },
+    });
+    if (hubs.length === 0) return;
+
+    const start = trip.startDate.toISOString().slice(0, 10);
+    const end = trip.endDate ? trip.endDate.toISOString().slice(0, 10) : undefined;
+    const windows = allocateCheckpointWindows(
+      hubs.map((hub) => ({ days: Math.max(1, hub.days ?? 2) })),
+      { start, end },
+    );
+
+    for (let i = 0; i < hubs.length; i += 1) {
+      const hub = hubs[i]!;
+      const window = windows[i];
+      if (!window) continue;
+      await this.db.stop.update({
+        where: { id: hub.id },
+        data: {
+          days: window.days,
+          dateStart: atUtcNoon(window.start) ?? null,
+          dateEnd: atUtcNoon(window.end) ?? null,
+          scheduleStart: atUtcNoon(window.start) ?? null,
+          scheduleEnd: atUtcNoon(window.end) ?? null,
+        },
+      });
+    }
   }
 
 
@@ -1490,22 +1767,30 @@ export class JourneyService {
 
     try {
       const executeTools = input.executeTools !== false;
-      const { skeleton, llm } = input.skeleton
+      const normalizeOptions = {
+        tripOriginCity: trip.originCity,
+        preferences: mergedPreferences,
+      };
+      // Draft-locked skeletons skip planSkeleton (and its normalize). Always
+      // normalize here so originIata / airportIata exist — otherwise
+      // search_flights is silently skipped and Bookings only shows hotels.
+      const planned = input.skeleton
         ? { skeleton: input.skeleton, llm: this.planner.llmName }
         : await this.planner.planSkeleton(
             {
               prompt: input.prompt,
               preferences: mergedPreferences,
             },
-            {
-              tripOriginCity: trip.originCity,
-              preferences: mergedPreferences,
-            },
+            normalizeOptions,
             {
               tripId: input.tripId,
               userId: input.userId,
             },
           );
+      const skeleton = input.skeleton
+        ? normalizeTripSkeleton(planned.skeleton, normalizeOptions)
+        : planned.skeleton;
+      const llm = planned.llm;
       await planLog?.progress({
         message: input.skeleton ? "Locked planning draft loaded" : "LLM skeleton generated",
         payload: {
@@ -1985,21 +2270,34 @@ function planningAssistantErrorMessage(err: unknown): string {
     case "LLM_INVALID_JSON":
     case "LLM_INVALID_SKELETON":
     case "LLM_INVALID_SLOTS":
-      return "Maaf, saya belum bisa menyusun rancangan dari pesan itu. Coba tulis ulang dengan lebih jelas, atau kirim lagi sebentar.";
+      return "I couldn't turn that message into a draft. Try rephrasing it, or send it again in a moment.";
     case "VALIDATION_ERROR":
-      return "Maaf, saya belum bisa memproses pesan itu. Coba perjelas tujuan, tanggal, atau ubah sedikit teksnya.";
+      return "I couldn't process that message. Add a clearer destination, dates, or a small change to the text.";
     case "PLAN_NEEDS_INPUT":
-      return "Ada beberapa detail yang masih kurang. Boleh lengkapi dulu, lalu kita lanjutkan rancangannya.";
+      return "A few details are still missing. Fill those in, then we can continue the draft.";
     default:
       break;
   }
 
-  return "Maaf, terjadi gangguan saat menyusun balasan. Silakan coba kirim pesan lagi.";
+  return "Something went wrong while writing a reply. Please send your message again.";
 }
 
 function dayOrUndefined(value: string | undefined): Date | undefined {
   if (!value) return undefined;
   return new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+}
+
+function mergeRawLock(raw: unknown, isLocked: boolean | undefined): Record<string, unknown> {
+  const base =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : {};
+  if (isLocked !== undefined) base.isLocked = isLocked;
+  return base;
+}
+
+function rawLocked(raw: Record<string, unknown>): boolean {
+  return raw.isLocked === true;
 }
 
 function countryCode(value: string | undefined): string | undefined {
@@ -2020,6 +2318,8 @@ function nodeTypeToKind(type: string): StopKind {
     case "LEG":
       return "travel";
     case "CHECKPOINT":
+      return "hub";
+    case "BOOKING":
       return "stay";
     default:
       return "activity";

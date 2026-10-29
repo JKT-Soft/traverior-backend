@@ -125,6 +125,48 @@ describe("need-tools", () => {
     });
   });
 
+  it("still searches flights when only skeleton carries originIata (draft path)", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Vietnam",
+        originCity: "Jakarta",
+        originIata: "CGK",
+        checkpoints: [
+          {
+            city: "Hanoi",
+            countryCode: "VN",
+            airportIata: "HAN",
+            role: "STAY",
+            days: 2,
+            needs: ["flights", "hotels"],
+          },
+          {
+            city: "Ho Chi Minh City",
+            countryCode: "VN",
+            airportIata: "SGN",
+            role: "STAY",
+            days: 2,
+            needs: ["flights", "hotels"],
+          },
+        ],
+      },
+      {
+        // Mimic planTrip context: dates present, no IATA on the request.
+        departureDate: "2026-11-01",
+        returnDate: "2026-11-06",
+        checkIn: "2026-11-01",
+        checkOut: "2026-11-06",
+        adults: 1,
+      },
+    );
+    const outbound = plan[0]?.calls.find((call) => call.tool === "search_flights");
+    const inbound = plan[1]?.calls.find((call) => call.tool === "search_flights");
+    assert.equal(outbound?.arguments.origin, "CGK");
+    assert.equal(outbound?.arguments.destination, "HAN");
+    assert.equal(inbound?.arguments.origin, "SGN");
+    assert.equal(inbound?.arguments.destination, "CGK");
+  });
+
   it("uses skeleton airport codes when request context omits IATA codes", () => {
     const plan = buildToolPlan(
       {
@@ -169,6 +211,27 @@ describe("need-tools", () => {
     expectFlight(plan[0]?.calls, "CGK", "LHR", "2026-12-01");
     expectFlight(plan[1]?.calls, "LHR", "CDG", "2026-12-04");
     expectFlight(plan[2]?.calls, "AMS", "CGK", "2026-12-07");
+  });
+
+  it("asks for trip checklist items once per destination country", () => {
+    const plan = buildToolPlan(
+      {
+        title: "Japan and Korea",
+        checkpoints: [
+          { city: "Osaka", countryCode: "JP", role: "STAY", days: 2, needs: ["checklist"] },
+          { city: "Kyoto", countryCode: "JP", role: "STAY", days: 2, needs: ["checklist"] },
+          { city: "Seoul", countryCode: "KR", role: "STAY", days: 2, needs: ["checklist"] },
+        ],
+      },
+      {},
+    );
+
+    const checklistArgs = plan.map(
+      (entry) => entry.calls.find((call) => call.tool === "generate_checklist")?.arguments,
+    );
+    assert.equal(checklistArgs[0]?.omitTripItems, undefined);
+    assert.equal(checklistArgs[1]?.omitTripItems, true);
+    assert.equal(checklistArgs[2]?.omitTripItems, undefined);
   });
 });
 

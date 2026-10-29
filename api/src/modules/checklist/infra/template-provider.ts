@@ -10,25 +10,33 @@ export class TemplateChecklistProvider implements ChecklistProvider {
   readonly name = "internal";
 
   async generate(query: ChecklistQuery): Promise<ChecklistResult> {
-    const base: ChecklistItem[] = [
+    const tripItems: ChecklistItem[] = [
       { id: "passport", label: "Passport valid 6+ months", done: false, source: "template" },
       { id: "tickets", label: "Flight tickets printed / offline copy", done: false, source: "template" },
-      { id: "hotel", label: "Hotel confirmation", done: false, source: "template" },
       { id: "insurance", label: "Travel insurance", done: false, source: "template" },
       { id: "adapter", label: `Power adapter for ${query.destination}`, done: false, source: "template" },
     ];
+    const stopItems: ChecklistItem[] = [
+      { id: "hotel", label: "Hotel confirmation", done: false, source: "template" },
+    ];
 
-    const visaItems = (query.visaDocuments ?? []).map((label, i) => ({
-      id: `visa-${i}`,
-      label,
-      done: false,
-      source: "visa" as const,
-    }));
+    const visaItems = query.omitTripItems
+      ? []
+      : (query.visaDocuments ?? []).map((label, i) => ({
+          id: `visa-${i}`,
+          label,
+          done: false,
+          source: "visa" as const,
+        }));
 
     return {
       contentType: "checklist",
       provider: "internal",
-      items: [...visaItems, ...base],
+      items: [
+        ...visaItems,
+        ...(query.omitTripItems ? [] : tripItems),
+        ...stopItems,
+      ],
       tips: tipsForDestination(query.destination),
       fetchedAt: new Date().toISOString(),
     };

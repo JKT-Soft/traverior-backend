@@ -116,6 +116,12 @@ const addNodeSchema = z.object({
   deepLinkUrl: z.string().url().optional(),
   provider: z.string().optional(),
   providerRef: z.string().optional(),
+  locationLabel: z.string().optional(),
+  locationLat: z.number().optional(),
+  locationLng: z.number().optional(),
+  scheduleStart: z.string().datetime({ offset: true }).optional(),
+  scheduleEnd: z.string().datetime({ offset: true }).optional(),
+  days: z.number().int().positive().optional(),
 });
 
 const nodeParamsSchema = z.object({
@@ -147,6 +153,11 @@ const updateNodeSchema = z.object({
   locationLat: z.number().nullable().optional(),
   locationLng: z.number().nullable().optional(),
   days: z.number().int().positive().nullable().optional(),
+  /** HH:mm for hotel check-in / display time when nodeId is a booking. */
+  timeText: z.string().regex(/^\d{1,2}:\d{2}$/).optional(),
+  /** Match a venue inside a places search booking. */
+  matchTitle: z.string().optional(),
+  providerRef: z.string().optional(),
 });
 
 const reorderNodesSchema = z.object({
@@ -563,7 +574,8 @@ export function createJourneyRoutes(service: JourneyService): FastifyPluginAsync
         schema: routeDocs({
           tags: ["Trips"],
           summary: "Update trip node",
-          description: "Update title, status, lock status, schedule, or location of a stop.",
+          description:
+            "Update title, status, lock status, schedule, or location of a stop. Also accepts catalog booking IDs (hotel/event/place) from the plan response nodeId field.",
           params: nodeParamsSchema,
           paramsExample: { tripId: SAMPLE_TRIP_ID, nodeId: SAMPLE_NODE_ID },
           body: updateNodeSchema,

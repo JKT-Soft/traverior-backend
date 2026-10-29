@@ -14,6 +14,7 @@ type ChecklistModule = {
         destination: string;
         passportCountry?: string;
         visaDocuments?: string[];
+        omitTripItems?: boolean;
       }) => Promise<unknown>;
       providerName: string;
     };
@@ -34,6 +35,7 @@ export async function registerChecklistTools(
       destination: z.string(),
       passportCountry: z.string().optional(),
       visaDocuments: z.array(z.string()).optional(),
+      omitTripItems: z.boolean().optional(),
     },
     async (args) => {
       try {

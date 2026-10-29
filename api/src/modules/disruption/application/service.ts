@@ -262,8 +262,8 @@ export class DisruptionMonitorService {
         stopId: stop.id,
         kind: "cancel",
         severity: "critical",
-        title: `Pemberhentian Dibatalkan: ${stop.name}`,
-        body: stop.subtitle ?? `Jadwal di ${stop.name} telah dibatalkan atau dilewati.`,
+        title: `Stop cancelled: ${stop.name}`,
+        body: stop.subtitle ?? `The schedule at ${stop.name} was cancelled or skipped.`,
         payload: { stopId: stop.id, name: stop.name },
       });
     }
@@ -279,18 +279,18 @@ export class DisruptionMonitorService {
 
         if (isCancelled) {
           const airline =
-            booking.flight.airlineName ?? booking.flight.flightNumber ?? "Penerbangan";
+            booking.flight.airlineName ?? booking.flight.flightNumber ?? "Flight";
           candidates.push({
             tripId,
             stopId: stop.id,
             kind: "cancel",
             severity: "critical",
-            title: `Penerbangan Dibatalkan: ${airline}`,
-            body: `Penerbangan ${
+            title: `Flight cancelled: ${airline}`,
+            body: `Flight ${
               booking.flight.flightNumber ? booking.flight.flightNumber + " " : ""
-            }dari ${booking.flight.originIata} ke ${
+            }from ${booking.flight.originIata} to ${
               booking.flight.destinationIata
-            } telah dibatalkan oleh pihak maskapai.`,
+            } was cancelled by the airline.`,
             payload: {
               stopId: stop.id,
               flightId: booking.flight.id,
@@ -316,8 +316,8 @@ export class DisruptionMonitorService {
             stopId: stop.id,
             kind: "cancel",
             severity: "critical",
-            title: `Reservasi Hotel Dibatalkan: ${booking.hotel.name}`,
-            body: `Pemesanan penginapan di ${booking.hotel.name} telah dibatalkan.`,
+            title: `Hotel reservation cancelled: ${booking.hotel.name}`,
+            body: `The stay at ${booking.hotel.name} was cancelled.`,
             payload: {
               stopId: stop.id,
               hotelId: booking.hotel.id,
@@ -341,8 +341,8 @@ export class DisruptionMonitorService {
             stopId: stop.id,
             kind: "cancel",
             severity: "critical",
-            title: `Acara Dibatalkan: ${booking.event.name}`,
-            body: `Acara ${booking.event.name} telah dibatalkan oleh penyelenggara.`,
+            title: `Event cancelled: ${booking.event.name}`,
+            body: `${booking.event.name} was cancelled by the organizer.`,
             payload: {
               stopId: stop.id,
               eventId: booking.event.id,
@@ -392,19 +392,19 @@ export class DisruptionMonitorService {
           flightDelayed = true;
           const severity = delayMinutes >= 120 ? "critical" : "warning";
           const airline =
-            booking.flight.airlineName ?? booking.flight.flightNumber ?? "Penerbangan";
+            booking.flight.airlineName ?? booking.flight.flightNumber ?? "Flight";
 
           candidates.push({
             tripId,
             stopId: stop.id,
             kind: "delay",
             severity,
-            title: `Penerbangan Tertunda: ${airline} (${delayMinutes} mnt)`,
-            body: `Penerbangan ${
+            title: `Flight delayed: ${airline} (${delayMinutes} min)`,
+            body: `Flight ${
               booking.flight.flightNumber ? booking.flight.flightNumber + " " : ""
-            }dari ${booking.flight.originIata} ke ${
+            }from ${booking.flight.originIata} to ${
               booking.flight.destinationIata
-            } tertunda sekitar ${delayMinutes} menit dari jadwal semula.`,
+            } is about ${delayMinutes} minutes behind schedule.`,
             payload: {
               stopId: stop.id,
               flightId: booking.flight.id,
@@ -423,8 +423,8 @@ export class DisruptionMonitorService {
         stopId: stop.id,
         kind: "delay",
         severity: "warning",
-        title: `Jadwal Terhambat di ${stop.name}`,
-        body: `Perjalanan pada ${stop.name} berstatus terganggu (disrupted). Silakan periksa estimasi waktu terbaru.`,
+        title: `Schedule disrupted at ${stop.name}`,
+        body: `Travel at ${stop.name} is disrupted. Check the latest time estimate.`,
         payload: { stopId: stop.id, name: stop.name, status: stop.status },
       });
     }
@@ -464,10 +464,10 @@ export class DisruptionMonitorService {
             stopId: stop.id,
             kind: "weather",
             severity: isCritical ? "critical" : "warning",
-            title: `Peringatan Cuaca Buruk di ${stop.name}: ${alert.event}`,
+            title: `Severe weather alert in ${stop.name}: ${alert.event}`,
             body:
               alert.description ||
-              `Peringatan cuaca berpotensi mengganggu aktivitas di ${stop.name}.`,
+              `A weather alert may affect plans in ${stop.name}.`,
             payload: {
               stopId: stop.id,
               location: stop.name,
@@ -489,8 +489,8 @@ export class DisruptionMonitorService {
               stopId: stop.id,
               kind: "weather",
               severity: "warning",
-              title: `Prakiraan Cuaca Buruk di ${stop.name} (${day.date})`,
-              body: `Prakiraan cuaca menunjukkan kondisi berpotensi mengganggu: ${day.summary}. Suhu berkisar ${day.minC}°C - ${day.maxC}°C.`,
+              title: `Severe forecast in ${stop.name} (${day.date})`,
+              body: `The forecast may affect plans: ${day.summary}. Temperature ${day.minC}°C–${day.maxC}°C.`,
               payload: {
                 stopId: stop.id,
                 location: stop.name,

@@ -20,4 +20,18 @@ describe("TemplateChecklistProvider", () => {
     assert.equal(result.tips[0]?.category, "getting_around");
     assert.match(result.tips[0]?.body ?? "", /Osaka/);
   });
+
+  it("keeps only stop items when trip items are omitted", async () => {
+    const p = new TemplateChecklistProvider();
+    const result = await p.generate({
+      destination: "Kyoto",
+      visaDocuments: ["eVisa"],
+      omitTripItems: true,
+    });
+    assert.deepEqual(
+      result.items.map((item) => item.id),
+      ["hotel"],
+    );
+    assert.match(result.tips[0]?.body ?? "", /Kyoto/);
+  });
 });

@@ -1,6 +1,8 @@
 import type {
   FlightAirport,
   FlightOffer,
+  FlightOfferDetail,
+  FlightOfferDetailQuery,
   FlightProvider,
   FlightSearchQuery,
   FlightSlice,
@@ -75,6 +77,52 @@ export class MockFlightProvider implements FlightProvider {
       departureDate: new Date().toISOString().slice(0, 10),
     });
     return offer ?? null;
+  }
+
+  async getOfferDetail(query: FlightOfferDetailQuery): Promise<FlightOfferDetail | null> {
+    const offer =
+      (query.providerRef ? await this.getOffer(query.providerRef) : null) ??
+      (
+        await this.searchFlights({
+          origin: query.origin || "CGK",
+          destination: query.destination || "KIX",
+          departureDate: query.departureDate || new Date().toISOString().slice(0, 10),
+          returnDate: query.returnDate,
+          adults: query.adults,
+          cabinClass: query.cabinClass,
+        })
+      )[0] ??
+      null;
+    if (!offer) return null;
+    return {
+      offer,
+      bookingOptions: [
+        {
+          id: "mock-airline",
+          agency: offer.airline.name,
+          agencyCode: offer.airline.iataCode,
+          price: offer.price,
+          bookingUrl: offer.deepLinkUrl ?? "https://example.com/book/airline",
+          isAirlineDirect: true,
+          fareName: offer.cabinLabel,
+          logoUrl: null,
+        },
+        {
+          id: "mock-ota",
+          agency: "Example Travel",
+          agencyCode: "EXAMPLE",
+          price: {
+            amount: Math.round(offer.price.amount * 1.03),
+            currency: offer.price.currency,
+            isEstimate: true,
+          },
+          bookingUrl: "https://example.com/book/ota",
+          isAirlineDirect: false,
+          fareName: "Standard",
+          logoUrl: null,
+        },
+      ],
+    };
   }
 }
 

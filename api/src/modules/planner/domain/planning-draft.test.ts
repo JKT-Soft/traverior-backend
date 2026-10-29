@@ -61,10 +61,31 @@ describe("planning-draft", () => {
     const card = draftCardFromSkeleton(japanSkeleton);
     const skeleton = skeletonFromDraftCard(card);
     assert.equal(skeleton.title, "Jepang");
+    assert.equal(skeleton.originCity, "Jakarta");
+    assert.equal(skeleton.originIata, "CGK");
     assert.equal(skeleton.checkpoints.length, 2);
+    assert.equal(skeleton.checkpoints[0]?.airportIata, "NRT");
     assert.ok(skeleton.checkpoints[0]?.needs.includes("flights"));
     assert.ok(skeleton.checkpoints[0]?.needs.includes("hotels"));
     assert.equal(skeleton.checkpoints[0]?.search?.events, 2);
+  });
+
+  it("resolves originIata even when draft has no airport codes on stays", () => {
+    const card = draftCardFromSkeleton({
+      ...japanSkeleton,
+      originIata: undefined,
+      checkpoints: japanSkeleton.checkpoints.map((checkpoint) => ({
+        ...checkpoint,
+        airportIata: undefined,
+      })),
+    });
+    for (const stop of card.stops) {
+      if (stop.kind === "stay") delete (stop as { airportIata?: string }).airportIata;
+    }
+    const skeleton = skeletonFromDraftCard(card);
+    assert.equal(skeleton.originIata, "CGK");
+    assert.equal(skeleton.checkpoints[0]?.airportIata, "NRT");
+    assert.equal(skeleton.checkpoints[1]?.airportIata, "KIX");
   });
 
   it("detects draft changes for history cards", () => {

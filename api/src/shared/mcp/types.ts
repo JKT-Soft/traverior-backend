@@ -91,6 +91,7 @@ export type McpDomainServices = {
       destination: string;
       passportCountry?: string;
       visaDocuments?: string[];
+      omitTripItems?: boolean;
     }) => Promise<ChecklistResult>;
     providerName: string;
   };
@@ -112,6 +113,8 @@ export type PlannerToolContext = {
   checkOut?: string;
   adults?: number;
   passportCountry?: string;
+  /** When true, checklist generation keeps only stop-specific items. */
+  omitTripChecklistItems?: boolean;
   originLat?: number;
   originLng?: number;
   destLat?: number;

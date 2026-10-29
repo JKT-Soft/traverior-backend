@@ -40,6 +40,8 @@ describe("loadEnv", () => {
         TRAVELPAYOUTS_MARKER: "m1",
         TRAVELPAYOUTS_CURRENCY: "idr",
         TRAVELPAYOUTS_MARKET: "id",
+        GOOGLE_FLIGHTS_CURRENCY: "IDR",
+        GOOGLE_FLIGHTS_LANGUAGE: "id",
         LITEAPI_KEY: "l",
         GOOGLE_MAPS_API_KEY: "g",
         OPENWEATHER_API_KEY: "o",
@@ -59,6 +61,8 @@ describe("loadEnv", () => {
     assert.equal(env.secrets.travelpayoutsMarker, "m1");
     assert.equal(env.secrets.travelpayoutsCurrency, "idr");
     assert.equal(env.secrets.travelpayoutsMarket, "id");
+    assert.equal(env.secrets.googleFlightsCurrency, "IDR");
+    assert.equal(env.secrets.googleFlightsLanguage, "id");
     assert.equal(env.providers.flights, "duffel");
   });
 
