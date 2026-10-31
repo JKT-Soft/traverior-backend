@@ -147,6 +147,7 @@ export class InProcessMcpClient implements McpToolClient {
         const s = this.services.checklist;
         const checklist = await s.generate({
           destination: String(args.destination),
+          countryCode: args.countryCode ? String(args.countryCode) : undefined,
           passportCountry: args.passportCountry ? String(args.passportCountry) : undefined,
           visaDocuments: Array.isArray(args.visaDocuments)
             ? (args.visaDocuments as string[])

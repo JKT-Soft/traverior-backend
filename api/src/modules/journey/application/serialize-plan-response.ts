@@ -1,3 +1,4 @@
+import { resolveOfferDeepLink } from "../../../shared/deep-link.js";
 import { moneyToNumber } from "./serialize-trip.js";
 
 type CatalogRow = {
@@ -218,6 +219,7 @@ export function serializePlanResponse(input: {
     const flightIds: string[] = [];
     const hotelIds: string[] = [];
     const eventIds: string[] = [];
+    const checklistIds: string[] = [];
     const placeIds: string[] = [];
     const routeIds: string[] = [];
     const weatherIds: string[] = [];
@@ -226,6 +228,11 @@ export function serializePlanResponse(input: {
     for (const booking of bookings) {
       const row = rowFor(booking);
       const content = catalogPayload(row);
+      const deepLinkUrl = resolveOfferDeepLink(booking.kind, content, booking.deepLinkUrl);
+      if (deepLinkUrl) {
+        content.deepLinkUrl = deepLinkUrl;
+        content.deepLink = deepLinkUrl;
+      }
       const cost = budgetFrom(booking.costAmount, booking.costCurrency, booking.costIsEstimate, currency);
       if (booking.kind === "flight") {
         const id = `flt_${citySlug}_${++flightNo}`;
@@ -294,6 +301,7 @@ export function serializePlanResponse(input: {
           title: textTitle(row, "Travel checklist"),
           cost,
         };
+        checklistIds.push(id);
       }
     }
 
@@ -310,7 +318,7 @@ export function serializePlanResponse(input: {
       name: stop.name,
       subtitle: stop.subtitle ?? null,
       nodeId: stop.id,
-      bookings: { flightIds, hotelIds, eventIds },
+      bookings: { flightIds, hotelIds, eventIds, checklistIds },
       maps: {
         href: `/v1/trips/${trip.id}/nodes?parentId=${stop.id}`,
         routeIds,

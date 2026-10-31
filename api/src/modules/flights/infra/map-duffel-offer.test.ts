@@ -128,6 +128,9 @@ describe("mapDuffelOffer", () => {
     assert.equal(offer.price.amount, 4_100_000);
     assert.equal(offer.price.isEstimate, false);
     assert.equal(offer.slices[0]?.segments.length, 2);
+    assert.ok(offer.deepLinkUrl?.includes("google.com/travel/flights"));
+    assert.ok(offer.deepLinkUrl?.includes("CGK"));
+    assert.ok(offer.deepLinkUrl?.includes("KIX"));
   });
 
   it("falls back when slices and carriers are sparse", () => {

@@ -47,7 +47,10 @@ describe("serializePlanResponse", () => {
                   flight: {
                     id: "flight-row",
                     name: "Airline 123",
-                    raw: { origin: "CGK", destination: "NRT" },
+                    originIata: "CGK",
+                    destinationIata: "NRT",
+                    departureAt: new Date("2026-10-01T08:00:00Z"),
+                    raw: { origin: "CGK", destination: "NRT", departureAt: "2026-10-01T08:00:00Z" },
                   },
                 },
               ],
@@ -66,7 +69,18 @@ describe("serializePlanResponse", () => {
                 {
                   id: "hotel-booking",
                   kind: "hotel",
-                  hotel: { id: "hotel-row", name: "Tokyo Hotel", raw: { name: "Tokyo Hotel" } },
+                  hotel: {
+                    id: "hotel-row",
+                    name: "Tokyo Hotel",
+                    checkIn: new Date("2026-10-01"),
+                    checkOut: new Date("2026-10-05"),
+                    raw: {
+                      name: "Tokyo Hotel",
+                      city: "Tokyo",
+                      checkIn: "2026-10-01",
+                      checkOut: "2026-10-05",
+                    },
+                  },
                 },
                 {
                   id: "checklist-booking",
@@ -123,5 +137,14 @@ describe("serializePlanResponse", () => {
       (travel.bookings as { flightIds: string[] }).flightIds,
       (stay.bookings as { flightIds: string[] }).flightIds,
     );
+    assert.deepEqual(
+      (stay.bookings as { checklistIds: string[] }).checklistIds,
+      Object.keys(response.catalog.checklists),
+    );
+
+    const flight = Object.values(response.catalog.flights)[0]!;
+    assert.ok(String(flight.deepLinkUrl).includes("google.com/travel/flights"));
+    const hotel = Object.values(response.catalog.hotels)[0]!;
+    assert.ok(String(hotel.deepLinkUrl).includes("google.com/travel/hotels"));
   });
 });

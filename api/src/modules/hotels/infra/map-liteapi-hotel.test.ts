@@ -87,6 +87,8 @@ describe("mapLiteApiHotel", () => {
     assert.equal(offer.refundable, true);
     assert.equal(offer.thumbnailUrl, "https://cdn.liteapi.travel/hotels/osaka.jpg");
     assert.equal(offer.price.isEstimate, false);
+    assert.ok(offer.deepLinkUrl?.includes("google.com/travel/hotels"));
+    assert.ok(offer.deepLinkUrl?.includes("Osaka"));
   });
 
   it("falls back when rate and meta are sparse", () => {

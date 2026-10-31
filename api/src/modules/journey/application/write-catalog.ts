@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { resolveOfferDeepLink } from "../../../shared/deep-link.js";
 import type { PlanBookingDraft } from "./persist-plan.js";
 
 type CatalogDb = Pick<
@@ -79,6 +80,10 @@ function providerOf(booking: PlanBookingDraft, payload: Record<string, unknown>)
   return booking.provider ?? text(payload.provider) ?? "unknown";
 }
 
+function deepLinkOf(booking: PlanBookingDraft, payload: Record<string, unknown>): string | undefined {
+  return resolveOfferDeepLink(booking.kind, payload, booking.deepLinkUrl);
+}
+
 function link(kind: keyof CatalogLink, id: string): CatalogLink {
   return { [kind]: id };
 }
@@ -123,7 +128,7 @@ export async function createCatalogLink(
           priceAmount: booking.costAmount ?? price.amount,
           priceCurrency: chars(booking.costCurrency, 3) ?? price.currency,
           priceIsEstimate: false,
-          deepLinkUrl: booking.deepLinkUrl ?? text(payload.deepLink),
+          deepLinkUrl: deepLinkOf(booking, payload),
           raw: json(payload),
           fetchedAt: now,
         },
@@ -159,7 +164,7 @@ export async function createCatalogLink(
           priceAmount: booking.costAmount ?? price.amount,
           priceCurrency: chars(booking.costCurrency, 3) ?? price.currency,
           priceIsEstimate: true,
-          deepLinkUrl: booking.deepLinkUrl ?? text(payload.deepLink),
+          deepLinkUrl: deepLinkOf(booking, payload),
           raw: json(payload),
           fetchedAt: now,
         },
@@ -184,7 +189,7 @@ export async function createCatalogLink(
           priceAmount: booking.costAmount ?? price.amount,
           priceCurrency: chars(booking.costCurrency, 3) ?? price.currency,
           priceIsEstimate: true,
-          deepLinkUrl: booking.deepLinkUrl ?? text(payload.deepLink),
+          deepLinkUrl: deepLinkOf(booking, payload),
           raw: json(payload),
           fetchedAt: now,
         },
