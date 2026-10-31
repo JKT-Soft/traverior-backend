@@ -22,7 +22,6 @@ import { PolicyService } from "../../policy/service.js";
 import type { PlannerService } from "../../planner/service.js";
 import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlanSkeletonInput, TripSkeleton } from "../../planner/domain/skeleton.js";
-import { normalizeTripSkeleton } from "../../planner/domain/normalize-skeleton.js";
 import type { PlannerToolContext } from "../../../shared/mcp/index.js";
 import { coverImageUrlFromStops, coverLocationFromTrip } from "./cover-image.js";
 import { serializeTrip } from "./serialize-trip.js";

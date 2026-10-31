@@ -29,14 +29,8 @@ export class TemplateChecklistProvider implements ChecklistProvider {
           source: "visa" as const,
         }));
 
-    const essentials: ChecklistItem[] = [
-      { id: "passport", label: "Passport valid 6+ months", done: false, source: "template" },
-      { id: "tickets", label: "Flight tickets printed / offline copy", done: false, source: "template" },
-      { id: "hotel", label: "Hotel confirmation saved offline", done: false, source: "template" },
-      { id: "insurance", label: "Travel insurance", done: false, source: "template" },
-      { id: "adapter", label: `Power adapter for ${city}`, done: false, source: "template" },
-    ];
-
+    const city = query.destination.trim() || "your destination";
+    const country = query.countryCode?.trim().toUpperCase() || inferCountryKey(city);
     const local = localItemsFor(city, country);
 
     return {
@@ -46,8 +40,9 @@ export class TemplateChecklistProvider implements ChecklistProvider {
         ...visaItems,
         ...(query.omitTripItems ? [] : tripItems),
         ...stopItems,
+        ...local,
       ],
-      tips: tipsForDestination(query.destination),
+      tips: tipsForDestination(query.destination, country),
       fetchedAt: new Date().toISOString(),
     };
   }

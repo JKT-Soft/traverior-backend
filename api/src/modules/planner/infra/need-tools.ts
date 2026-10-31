@@ -181,7 +181,7 @@ export function buildToolPlan(
         emittedTripChecklist = true;
       }
     }
-    localCtx = { ...localCtx, omitTripChecklistItems };
+    stayCtx = { ...stayCtx, omitTripChecklistItems };
 
     const calls: ToolCallSpec[] = [];
     for (const need of checkpoint.needs) {

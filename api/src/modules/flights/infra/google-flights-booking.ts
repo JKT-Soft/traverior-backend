@@ -273,9 +273,9 @@ async function scrapeDomBookingOptions(
       const end = rest.search(/\nPrices include required/i);
       const section = end > 0 ? rest.slice(0, end) : rest.slice(0, 5000);
 
-      const clkHrefs = [...document.querySelectorAll("a[href*='/travel/clk']")].map(
-        (a) => (a as HTMLAnchorElement).href,
-      );
+      const clkHrefs = Array.from(
+        document.querySelectorAll("a[href*='/travel/clk']"),
+      ).map((a) => (a as HTMLAnchorElement).href);
 
       const out: DomRow[] = [];
       const seen = new Set<string>();
