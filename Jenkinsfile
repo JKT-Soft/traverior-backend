@@ -52,7 +52,7 @@ pipeline {
     booleanParam(
       name: 'PRUNE_IMAGES',
       defaultValue: true,
-      description: 'Prune unused Docker images after deploy'
+      description: 'Prune unused Docker images after deploy.'
     )
   }
 
