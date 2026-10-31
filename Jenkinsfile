@@ -67,7 +67,7 @@ pipeline {
     CONTAINER_NAME             = 'traverior-api'
     CONTAINER_PORT             = '3000'
     ENV_FILE                   = 'api/.env'
-    DOCKER_CONTEXT             = 'api'
+    BUILD_CONTEXT              = 'api'
     DOCKERHUB_CREDENTIALS_ID   = "${params.DOCKERHUB_CREDENTIALS_ID ?: 'dockerhub-jktsoft'}"
     DOCKER_IMAGE_REPO          = "${params.DOCKER_IMAGE_REPO ?: 'jktsoft/traverior-api'}"
     INFISICAL_CREDENTIALS_ID   = "${params.INFISICAL_CREDENTIALS_ID ?: 'infisical-universal-auth'}"
@@ -86,10 +86,10 @@ pipeline {
           echo "Commit : $(git rev-parse --short HEAD)"
           echo "Branch : ${GIT_BRANCH:-unknown}"
           echo "Image  : ${DOCKER_IMAGE_REPO}"
-          echo "Context: ${DOCKER_CONTEXT}"
+          echo "Build context: ${BUILD_CONTEXT}"
           echo "Port   : ${HOST_PORT} -> ${CONTAINER_PORT}"
           echo "Infisical env : ${INFISICAL_ENV}"
-          test -f "${DOCKER_CONTEXT}/Dockerfile"
+          test -f "${BUILD_CONTEXT}/Dockerfile"
           docker version
         '''
       }
@@ -117,11 +117,11 @@ pipeline {
             docker builder prune -f || true
             docker container prune -f || true
 
-            echo "Building ${FULL_IMAGE} (context=${DOCKER_CONTEXT})"
+            echo "Building ${FULL_IMAGE} (context=${BUILD_CONTEXT})"
             build_ok=0
             for attempt in 1 2 3; do
               echo "docker build attempt ${attempt}/3"
-              if docker build --pull -t "${FULL_IMAGE}" -t "${LATEST_IMAGE}" "${DOCKER_CONTEXT}"; then
+              if docker build --pull -t "${FULL_IMAGE}" -t "${LATEST_IMAGE}" "${BUILD_CONTEXT}"; then
                 build_ok=1
                 break
               fi
