@@ -1,3 +1,5 @@
+# Local / manual runs: put secrets in .env (never commit .env).
+# Jenkins deploy writes .env from Infisical and uses: docker run --env-file .env.
 services:
   api:
     build:
