@@ -227,3 +227,5 @@ Shared test helpers live in `src/test/helpers.ts` (not covered). Coverage exclud
 3. Set `PROVIDER_*=yourprovider` in env.
 
 MCP sidecars (later) should call the same application services — not duplicate HTTP adapters.
+
+.
