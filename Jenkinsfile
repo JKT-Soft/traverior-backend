@@ -1,6 +1,12 @@
 pipeline {
   agent any
 
+  // Registers GitHub push trigger after the first manual run.
+  // Also enable in job config: "GitHub hook trigger for GITScm polling".
+  triggers {
+    githubPush()
+  }
+
   options {
     timestamps()
     disableConcurrentBuilds()
@@ -67,7 +73,7 @@ pipeline {
     INFISICAL_CREDENTIALS_ID   = "${params.INFISICAL_CREDENTIALS_ID ?: 'infisical-universal-auth'}"
     INFISICAL_PROJECT_ID       = "${params.INFISICAL_PROJECT_ID ?: '870cd5c6-03ea-441c-a052-3a1c186109f2'}"
     INFISICAL_ENV              = "${params.INFISICAL_ENV ?: 'prod'}"
-    INFISICAL_SECRET_PATH      = "${params.INFISICAL_SECRET_PATH ?: '/products/traverior-api'}"
+    INFISICAL_SECRET_PATH      = "${params.INFISICAL_SECRET_PATH ?: '/traverior/backend'}"
     INFISICAL_DOMAIN           = "${params.INFISICAL_DOMAIN ?: 'https://app.infisical.com'}"
   }
 
